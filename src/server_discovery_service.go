@@ -1,7 +1,10 @@
 package paxocache
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,10 +14,12 @@ import (
 )
 
 type ServerDiscoveryService struct {
-	knownHosts mapset.Set[string]
+	KnownHosts mapset.Set[string]
 	port       int
 	token      string
 	channel    chan DiscoveryEvent
+	// DO NOT ACCESS BEFORE CALLING .Listen()!
+	Listener net.Listener
 }
 
 // DiscoveryEventStatus enum
@@ -24,6 +29,14 @@ const (
 	DiscoveryEventStatusError = iota
 	DiscoveryEventStatusReceived
 )
+
+type RegisterRequestBody struct {
+		Address string
+}
+
+type RegisterResponseBody struct {
+	Addresses mapset.Set[string]
+}
 
 func (t DiscoveryEventStatus) String() string {
 	strings := []string{"Error", "Received"}
@@ -41,14 +54,9 @@ type DiscoveryEvent struct {
 	Msg    string
 }
 
-type IServerDiscoveryService interface {
-	Listen() (<-chan DiscoveryEvent, error)
-	RegisterWith(host string) error
-}
-
-func NewServerDiscoveryService(port int, token string) (IServerDiscoveryService, error) {
+func NewServerDiscoveryService(port int, token string) (*ServerDiscoveryService, error) {
 	return &ServerDiscoveryService{
-		knownHosts: mapset.NewSet[string](),
+		KnownHosts: mapset.NewSet[string](),
 		port:       port,
 		token:      token,
 		channel:    make(chan DiscoveryEvent, 16),
@@ -56,8 +64,27 @@ func NewServerDiscoveryService(port int, token string) (IServerDiscoveryService,
 }
 
 func (this *ServerDiscoveryService) register(w http.ResponseWriter, r *http.Request) {
-	// Close response before blocking on channel
-	w.WriteHeader(http.StatusNoContent)
+	// Decode JSON
+	var body RegisterRequestBody
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	this.KnownHosts.Add(body.Address)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	err = json.NewEncoder(w).Encode(this.KnownHosts)
+	if err != nil {
+		this.channel <- DiscoveryEvent{
+			Status: DiscoveryEventStatusError,
+			Err:    err,
+		}
+
+		return
+	}
 
 	this.channel <- DiscoveryEvent{
 		Status: DiscoveryEventStatusReceived,
@@ -69,9 +96,12 @@ func (this *ServerDiscoveryService) register(w http.ResponseWriter, r *http.Requ
 // Automatically creates a Goroutine to listen in. Blocks until listener is ready
 func (this *ServerDiscoveryService) Listen() (<-chan DiscoveryEvent, error) {
 	listener, err := net.Listen("tcp", ":"+fmt.Sprint(this.port))
+	this.Listener = listener
 	if err != nil {
 		return this.channel, err
 	}
+
+	this.KnownHosts.Add(listener.Addr().String())
 
 	go func() {
 		// Defer runs right before function closes out
@@ -96,21 +126,34 @@ func (this *ServerDiscoveryService) Listen() (<-chan DiscoveryEvent, error) {
 }
 
 func (this *ServerDiscoveryService) RegisterWith(host string) error {
+	if this.Listener == nil {
+		return errors.New("Tried to register before listening! This is not allowed.")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel() // Release when done
 
+	payload := RegisterRequestBody{
+		Address: this.Listener.Addr().String(),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
 	url := host + "/paxocache/register"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 
 	req.Header.Set("User-Agent", "Go-HTTP-Client/1.1")
-	req.Header.Set("Accept", "text/plain")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
-	// Use the same port we listen on
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+			Timeout: 10 * time.Second,
 	}
 
 	// Execute req
