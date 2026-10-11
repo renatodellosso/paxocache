@@ -9,13 +9,13 @@ import (
 func main() {
 	fmt.Println("Creating service...")
 
-	listener, err := paxocache.NewServerDiscoveryService("")
+	listener, err := paxocache.NewServerDiscoveryService(8000, "")
 	if err != nil {
 		fmt.Printf("Error creating service: %v\n", err)
 		return
 	}
 
-	listenChan := listener.Listen()
+	listenChan, err := listener.Listen()
 
 	// Print events
 	go func() {
@@ -28,9 +28,9 @@ func main() {
 
 	time.Sleep(time.Second)
 
-	sender, err := paxocache.NewServerDiscoveryService("")
+	sender, err := paxocache.NewServerDiscoveryService(8001, "")
 
-	err = sender.RegisterWith("http://127.0.0.1:8080")
+	err = sender.RegisterWith("http://127.0.0.1:8000")
 	if err != nil {
 		fmt.Println(err)
 	}

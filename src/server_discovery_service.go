@@ -3,13 +3,18 @@ package paxocache
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
+
+	mapset "github.com/deckarep/golang-set/v3"
 )
 
 type ServerDiscoveryService struct {
-	knownHosts []string
-	token string
+	knownHosts mapset.Set[string]
+	port       int
+	token      string
+	channel    chan DiscoveryEvent
 }
 
 // DiscoveryEventStatus enum
@@ -17,12 +22,11 @@ type DiscoveryEventStatus int
 
 const (
 	DiscoveryEventStatusError = iota
-	DiscoveryEventStatusListening
 	DiscoveryEventStatusReceived
 )
 
 func (t DiscoveryEventStatus) String() string {
-	strings := []string{ "Error", "Listening", "Received" }
+	strings := []string{"Error", "Received"}
 
 	if t < 0 || int(t) >= len(strings) {
 		return "Unknown"
@@ -32,52 +36,67 @@ func (t DiscoveryEventStatus) String() string {
 }
 
 type DiscoveryEvent struct {
-	status DiscoveryEventStatus
-	err error
-	msg string
+	Status DiscoveryEventStatus
+	Err    error
+	Msg    string
 }
 
 type IServerDiscoveryService interface {
-	Listen() <- chan DiscoveryEvent
+	Listen() (<-chan DiscoveryEvent, error)
 	RegisterWith(host string) error
 }
 
-func NewServerDiscoveryService(token string) (IServerDiscoveryService, error) {
+func NewServerDiscoveryService(port int, token string) (IServerDiscoveryService, error) {
 	return &ServerDiscoveryService{
-		knownHosts: []string{},
-		token: token,
+		knownHosts: mapset.NewSet[string](),
+		port:       port,
+		token:      token,
+		channel:    make(chan DiscoveryEvent, 16),
 	}, nil
 }
 
 func (this *ServerDiscoveryService) register(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Received from %v\n", r.RemoteAddr)
+	// Close response before blocking on channel
+	w.WriteHeader(http.StatusNoContent)
+
+	this.channel <- DiscoveryEvent{
+		Status: DiscoveryEventStatusReceived,
+		Err:    nil,
+		Msg:    fmt.Sprintf("Received from %v\n", r.RemoteAddr),
+	}
 }
 
-// Automatically creates a Goroutine to listen in
-func (this *ServerDiscoveryService) Listen() <- chan DiscoveryEvent {
-	out := make(chan DiscoveryEvent)
+// Automatically creates a Goroutine to listen in. Blocks until listener is ready
+func (this *ServerDiscoveryService) Listen() (<-chan DiscoveryEvent, error) {
+	listener, err := net.Listen("tcp", ":"+fmt.Sprint(this.port))
+	if err != nil {
+		return this.channel, err
+	}
 
 	go func() {
 		// Defer runs right before function closes out
-		defer close(out) // Close channel when done
+		defer close(this.channel) // Close channel when done
 
-		http.HandleFunc("/paxocache/register", this.register)
-		err := http.ListenAndServe(":8080", nil)
+		// Separate mux to allow multiple services
+		mux := http.NewServeMux()
+
+		mux.HandleFunc("/paxocache/register", this.register)
+		err := http.Serve(listener, mux)
 
 		if err != nil {
-			out <- DiscoveryEvent{
-				status: DiscoveryEventStatusError,
-				err: err,
-				msg: "",
+			this.channel <- DiscoveryEvent{
+				Status: DiscoveryEventStatusError,
+				Err:    err,
+				Msg:    "",
 			}
 		}
 	}()
 
-	return out
+	return this.channel, nil
 }
 
 func (this *ServerDiscoveryService) RegisterWith(host string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel() // Release when done
 
 	url := host + "/paxocache/register"
@@ -89,6 +108,7 @@ func (this *ServerDiscoveryService) RegisterWith(host string) error {
 	req.Header.Set("User-Agent", "Go-HTTP-Client/1.1")
 	req.Header.Set("Accept", "text/plain")
 
+	// Use the same port we listen on
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -98,6 +118,8 @@ func (this *ServerDiscoveryService) RegisterWith(host string) error {
 	if err != nil {
 		return err
 	}
+
+	defer resp.Body.Close()
 
 	fmt.Printf("Request status: %v\n", resp.StatusCode)
 
