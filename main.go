@@ -2,35 +2,36 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
 	paxocache "paxocache/src"
-	"time"
 )
 
 func main() {
 	fmt.Println("Creating service...")
 
-	listener, err := paxocache.NewServerDiscoveryService(8000, "")
+	options := slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &options))
+
+	listener := paxocache.Listener{
+		Port: 8000,
+		Token: "abc",
+		Logger: logger,
+	}
+	serviceDiscovery, err := paxocache.NewServerDiscoveryService(logger)
+
 	if err != nil {
 		fmt.Printf("Error creating service: %v\n", err)
 		return
 	}
 
-	listenChan, err := listener.Listen()
+	err = listener.Listen()
 
-	// Print events
-	go func() {
-		for val := range listenChan {
-			fmt.Println(val)
-		}
+	serviceDiscovery.RegisterListener(&listener)
 
-		fmt.Println("Channel closed")
-	}()
-
-	time.Sleep(time.Second)
-
-	sender, err := paxocache.NewServerDiscoveryService(8001, "")
-
-	err = sender.RegisterWith("http://127.0.0.1:8000")
+	err = serviceDiscovery.ExchangeWith("http://127.0.0.1:8000")
 	if err != nil {
 		fmt.Println(err)
 	}

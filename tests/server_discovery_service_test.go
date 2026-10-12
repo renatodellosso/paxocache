@@ -25,7 +25,7 @@ func TestReceivesRegistration(t *testing.T) {
 
 	sender.Listen()
 
-	err = sender.RegisterWith("http://127.0.0.1:8000")
+	err = sender.ExchangeWith("http://127.0.0.1:8000")
 	if err != nil {
 		t.Fatalf("Error when trying to register: '%v'", err)
 	}
