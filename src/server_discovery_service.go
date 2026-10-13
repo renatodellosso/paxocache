@@ -53,10 +53,11 @@ func (this *ServerDiscoveryService) ExchangeWith(host string) error {
 	if this.KnownHosts.Cardinality() == 0 {
 		return errors.New("Tried to exchange before registering a listener! This is not allowed.")
 	}
-
-	res, _, err := Http(this.Token, this.logger).Get[ExchangePayload, ExchangePayload](host, EXCHANGE_PATH, ExchangePayload{
+ 
+	var res ExchangePayload
+	_, err := Http(this.Token, this.logger).Get(host, EXCHANGE_PATH, ExchangePayload{
 		this.KnownHosts.ToSlice(),
-	})
+	}, &res)
 
 	this.logger.Info("Received KnownHosts", "hosts", res.KnownHosts)
 	this.KnownHosts = this.KnownHosts.Union(mapset.NewSet(res.KnownHosts...))

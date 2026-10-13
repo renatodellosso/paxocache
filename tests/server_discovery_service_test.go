@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPullsAddressFromListener(t *testing.T) {
+func TestRegisterListenerPullsAddressFromListener(t *testing.T) {
 	listener := paxocache.Listener{
 		Logger: SilentLogger(),
 	}
@@ -29,7 +29,7 @@ func TestPullsAddressFromListener(t *testing.T) {
 	assert.Equal(t, listener.Port, port)
 }
 
-func TestPullsTokenFromListener(t *testing.T) {
+func TestRegisterListenerExchangePullsTokenFromListener(t *testing.T) {
 	listener := paxocache.Listener{
 		Logger: SilentLogger(),
 		Token: "abc",
@@ -41,4 +41,27 @@ func TestPullsTokenFromListener(t *testing.T) {
 	discovery.RegisterListener(&listener)
 	
 	assert.Equal(t, listener.Token, discovery.Token)
+}
+
+func TestExchangeUnionsKnownHosts(t *testing.T) {
+	listener := paxocache.Listener{
+		Logger: SilentLogger(),
+		Token: "",
+	}
+
+	err := listener.Listen()
+	assert.Nil(t, err)
+
+	discoveryA := paxocache.NewServerDiscoveryService(SilentLogger())
+	discoveryA.RegisterListener(&listener)
+	discoveryA.KnownHosts.Add("ABC")
+
+	discoveryB := paxocache.NewServerDiscoveryService(SilentLogger())
+	discoveryB.Token = ""
+	discoveryB.KnownHosts.Add("DEF")
+
+	err = discoveryB.ExchangeWith(discoveryA.KnownHosts.ToSlice()[0])
+	assert.Nil(t, err)
+
+	assert.ElementsMatch(t, discoveryA.KnownHosts.ToSlice(), discoveryB.KnownHosts.ToSlice())
 }

@@ -50,19 +50,20 @@ func TestReturnsPayload(t *testing.T) {
 		X: 1,
 	}
 
-	res, code, err := getClientWithResponse(200, body).Get[struct{}, Dummy]("localhost", "", struct{}{})
+	var res Dummy
+	code, err := getClientWithResponse(200, body).Get("localhost", "", struct{}{}, &res)
 
 	assert.Nil(t, err)
 	assert.Equal(t, 200, code)
-	assert.Equal(t, body,  *res)
+	assert.Equal(t, body,  res)
 }
 
 func TestReturnsError(t *testing.T) {
 	err := errors.New("Test error")
 
-	res, code, resErr := getClientWithResponse(500, err).Get[struct{}, Dummy]("localhost", "", struct{}{})
+	var res Dummy
+	code, resErr := getClientWithResponse(500, err).Get("localhost", "", struct{}{}, res)
 
-	assert.Nil(t, res)
 	assert.Equal(t, 500, code)
 	assert.Equal(t, err.Error(),  resErr.Error())
 }
