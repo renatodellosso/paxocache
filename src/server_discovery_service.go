@@ -1,7 +1,6 @@
 package paxocache
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -38,33 +37,17 @@ func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 
 	this.KnownHosts.Add(listener.listener.Addr().String())
 
-	listener.mux.HandleFunc(EXCHANGE_PATH, this.handleExchange)
+	listener.RegisterRoute(EXCHANGE_PATH, this.handleExchange)
 }
 
-func (this *ServerDiscoveryService) handleExchange(w http.ResponseWriter, r *http.Request) {
-	// Decode JSON
-	var body ExchangePayload
-	err := json.NewDecoder(r.Body).Decode(&body)
-	if err != nil {
-		this.logger.Error("Could not decode")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
+func (this *ServerDiscoveryService) handleExchange(ctx RequestContext[ExchangePayload, ExchangePayload]) {
+	body, _ := ctx.decodeBody()
 
-	err = json.NewEncoder(w).Encode(ExchangePayload{
+	ctx.respond(http.StatusOK, ExchangePayload{
 		this.KnownHosts.ToSlice(),
 	})
-	if err != nil {
-		this.logger.Error("Error on handling exchange", "error", err, "route", EXCHANGE_PATH)
-
-		return
-	}
 
 	this.KnownHosts = this.KnownHosts.Union(mapset.NewSet(body.KnownHosts...))
-
-	w.Header().Set("Content-Type", "application/json")
-
-	this.logger.Debug("Received exchange", "remote address", r.RemoteAddr, "route", EXCHANGE_PATH)
 }
 
 func (this *ServerDiscoveryService) ExchangeWith(host string) error {
