@@ -13,8 +13,7 @@ const EXCHANGE_PATH = "/cache/exchange"
 
 type ServerDiscoveryService struct {
 	KnownHosts mapset.Set[string]
-	port       int
-	token      string
+	Token      string
 	address net.Addr
 	logger *slog.Logger
 }
@@ -24,15 +23,15 @@ type ExchangePayload struct {
 	KnownHosts []string
 }
 
-func NewServerDiscoveryService(logger *slog.Logger) (*ServerDiscoveryService, error) {
+func NewServerDiscoveryService(logger *slog.Logger) *ServerDiscoveryService {
 	return &ServerDiscoveryService{
 		KnownHosts: mapset.NewSet[string](),
 		logger: logger,
-	}, nil
+	}
 }
 
 func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
-	this.token = listener.Token
+	this.Token = listener.Token
 	this.address = listener.listener.Addr()
 
 	this.KnownHosts.Add(listener.listener.Addr().String())
@@ -55,7 +54,7 @@ func (this *ServerDiscoveryService) ExchangeWith(host string) error {
 		return errors.New("Tried to exchange before registering a listener! This is not allowed.")
 	}
 
-	res, _, err := Http(this.token, this.logger).Get[ExchangePayload, ExchangePayload](host, EXCHANGE_PATH, ExchangePayload{
+	res, _, err := Http(this.Token, this.logger).Get[ExchangePayload, ExchangePayload](host, EXCHANGE_PATH, ExchangePayload{
 		this.KnownHosts.ToSlice(),
 	})
 

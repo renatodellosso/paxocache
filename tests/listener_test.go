@@ -32,12 +32,37 @@ func TestDecodeBodyDecodes(t *testing.T) {
 	assert.Equal(t, obj, decoded)
 }
 
-func TestListenerSetsPort(t *testing.T) {
+func TestListenerSetsPortWhenNotProvided(t *testing.T) {
 	listener := paxocache.Listener{
 		Logger: SilentLogger(),
 	}
 
-	assert.Equal(t, uint(0), listener.Port)
-	listener.Listen()
-	assert.NotEqual(t, 0, listener.Port)
+	assert.Equal(t, uint64(0), listener.Port)
+
+	err := listener.Listen()
+
+	assert.Nil(t, err)
+	assert.NotEqual(t, uint64(0), listener.Port)
+}
+
+func TestListenerDoesNotOverridePortWhenProvided(t *testing.T) {
+	listener := paxocache.Listener{
+		Logger: SilentLogger(),
+		Port: 8000,
+	}
+
+	err := listener.Listen()
+
+	assert.Nil(t, err)
+	assert.Equal(t, uint64(8000), listener.Port)
+}
+
+func TestListenerStartListeningSuccessfully(t *testing.T) {
+	listener := paxocache.Listener{
+		Logger: SilentLogger(),
+	}
+
+	err := listener.Listen()
+	
+	assert.Nil(t, err)
 }

@@ -20,14 +20,9 @@ func main() {
 		Token: "abc",
 		Logger: logger,
 	}
-	serviceDiscovery, err := paxocache.NewServerDiscoveryService(logger)
+	serviceDiscovery := paxocache.NewServerDiscoveryService(logger)
 
-	if err != nil {
-		fmt.Printf("Error creating service: %v\n", err)
-		return
-	}
-
-	err = listener.Listen()
+	err := listener.Listen()
 
 	serviceDiscovery.RegisterListener(&listener)
 

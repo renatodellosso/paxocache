@@ -12,7 +12,7 @@ import (
 
 type Listener struct {
 	// Set to 0 to automatically choose
-	Port       uint
+	Port       uint64
 	Token      string
 	Logger *slog.Logger
 
@@ -74,8 +74,9 @@ func (this *Listener) Listen() error {
 	}
 
 	// 10 = Base 10, 0 = auto match architecture's bit size
-	port, err := strconv.ParseUint(strings.Split(listener.Addr().String(), ":")[1], 10, 0)
-	this.Port = uint(port)
+	split := strings.Split(listener.Addr().String(), ":")
+	port, err := strconv.ParseUint(split[len(split) - 1], 10, 0)
+	this.Port = port
 
 	// Separate mux to allow multiple services
 	this.mux = http.NewServeMux()
