@@ -45,11 +45,6 @@ func getClientWithResponse(code int, payload any) *paxocache.HttpClient {
 	}
 }
 
-type Dummy struct {
-	// Must be uppercase to be serialized into JSON
-	X int
-}
-
 func TestReturnsPayload(t *testing.T) {
 	body := Dummy{
 		X: 1,

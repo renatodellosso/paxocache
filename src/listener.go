@@ -6,9 +6,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 type Listener struct {
+	// Set to 0 to automatically choose
 	Port       uint
 	Token      string
 	Logger *slog.Logger
@@ -20,7 +23,7 @@ type Listener struct {
 
 type RequestContext[TReq any, TRes any] struct {
 	path string
-	req *http.Request
+	Req *http.Request
 	writer http.ResponseWriter
 	logger *slog.Logger
 }
@@ -28,7 +31,7 @@ type RequestContext[TReq any, TRes any] struct {
 // If there's an error, automatically responds to the request with 500 and the error
 func (this *RequestContext[TReq, TRes]) DecodeBody() (TReq, error) {
 	var body TReq
-	err := json.NewDecoder(this.req.Body).Decode(&body)
+	err := json.NewDecoder(this.Req.Body).Decode(&body)
 
 	if err != nil {
 		this.RespondWithError(http.StatusInternalServerError, err)
@@ -65,9 +68,14 @@ func (this *RequestContext[TReq, TRes]) Respond(code int, res TRes) {
 func (this *Listener) Listen() error {
 	listener, err := net.Listen("tcp", ":"+fmt.Sprint(this.Port))
 	this.listener = listener
+
 	if err != nil {
 		return err
 	}
+
+	// 10 = Base 10, 0 = auto match architecture's bit size
+	port, err := strconv.ParseUint(strings.Split(listener.Addr().String(), ":")[1], 10, 0)
+	this.Port = uint(port)
 
 	// Separate mux to allow multiple services
 	this.mux = http.NewServeMux()
@@ -87,7 +95,7 @@ func (this *Listener) RegisterRoute[TReq any, TRes any](path string, handler fun
 	handle := func(writer http.ResponseWriter, req *http.Request) {
 		ctx := RequestContext[TReq, TRes]{
 			path: path,
-			req: req,
+			Req: req,
 			writer: writer,
 			logger: this.Logger,
 		}
