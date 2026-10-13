@@ -52,7 +52,9 @@ func (this *RequestContext[TReq, TRes]) respondWithAny(code int, payload any) {
 }
 
 func (this *RequestContext[TReq, TRes]) RespondWithError(code int, err error) {
-	this.respondWithAny(code, err)
+	this.respondWithAny(code, SafeError{
+		Msg: err.Error(),
+	})
 }
 
 func (this *RequestContext[TReq, TRes]) Respond(code int, res TRes) {

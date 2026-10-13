@@ -55,7 +55,7 @@ func (this *ServerDiscoveryService) ExchangeWith(host string) error {
 		return errors.New("Tried to exchange before registering a listener! This is not allowed.")
 	}
 
-	res, err := Http(this.token, this.logger).Get[ExchangePayload, ExchangePayload](host, EXCHANGE_PATH, ExchangePayload{
+	res, _, err := Http(this.token, this.logger).Get[ExchangePayload, ExchangePayload](host, EXCHANGE_PATH, ExchangePayload{
 		this.KnownHosts.ToSlice(),
 	})
 
