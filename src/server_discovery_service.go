@@ -41,9 +41,9 @@ func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 }
 
 func (this *ServerDiscoveryService) handleExchange(ctx RequestContext[ExchangePayload, ExchangePayload]) {
-	body, _ := ctx.decodeBody()
+	body, _ := ctx.DecodeBody()
 
-	ctx.respond(http.StatusOK, ExchangePayload{
+	ctx.Respond(http.StatusOK, ExchangePayload{
 		this.KnownHosts.ToSlice(),
 	})
 

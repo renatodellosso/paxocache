@@ -60,13 +60,24 @@ func (this *HttpClient) request[TReq any, TRes any](method string, url string, p
 		return nilEquiv, err
 	}
 
+	defer res.Body.Close()
+
+	if res.StatusCode >= 400 {
+		var decodedError error
+		err = json.NewDecoder(res.Body).Decode(&decodedError)
+
+		if err != nil {
+			return nilEquiv, err
+		}
+
+		return nilEquiv, decodedError
+	}
+
 	var resBody TRes
 	err = json.NewDecoder(res.Body).Decode(&resBody)
 	if err != nil {
 		return nilEquiv, err
 	}
-
-	defer res.Body.Close()
 
 	return resBody, nil
 }

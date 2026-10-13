@@ -26,12 +26,12 @@ type RequestContext[TReq any, TRes any] struct {
 }
 
 // If there's an error, automatically responds to the request with 500 and the error
-func (this *RequestContext[TReq, TRes]) decodeBody() (TReq, error) {
+func (this *RequestContext[TReq, TRes]) DecodeBody() (TReq, error) {
 	var body TReq
 	err := json.NewDecoder(this.req.Body).Decode(&body)
 
 	if err != nil {
-		this.respondWithError(http.StatusInternalServerError, err)
+		this.RespondWithError(http.StatusInternalServerError, err)
 	}
 
 	return body, err
@@ -51,11 +51,11 @@ func (this *RequestContext[TReq, TRes]) respondWithAny(code int, payload any) {
 	this.writer.WriteHeader(code)
 }
 
-func (this *RequestContext[TReq, TRes]) respondWithError(code int, err error) {
+func (this *RequestContext[TReq, TRes]) RespondWithError(code int, err error) {
 	this.respondWithAny(code, err)
 }
 
-func (this *RequestContext[TReq, TRes]) respond(code int, res TRes) {
+func (this *RequestContext[TReq, TRes]) Respond(code int, res TRes) {
 	this.respondWithAny(code, res)
 }
 
