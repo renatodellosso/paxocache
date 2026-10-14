@@ -26,7 +26,7 @@ func main() {
 
 	serviceDiscovery.RegisterListener(&listener)
 
-	err = serviceDiscovery.ExchangeWith("http://127.0.0.1:8000")
+	err = serviceDiscovery.ExchangeWith("http://127.0.0.1:8000", true)
 	if err != nil {
 		fmt.Println(err)
 	}
