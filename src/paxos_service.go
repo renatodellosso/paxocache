@@ -32,6 +32,16 @@ type Slot[T any] struct {
 	Val T
 }
 
+type PendingSlot[T any] struct {
+	Proposal Slot[T]
+	AcceptedBy mapset.Set[string]
+}
+
+type ChosenSlot[T any] struct {
+	Number uint64
+	Val T
+}
+
 // Handles Multipaxos for one log
 type PaxosService[T any] struct {
 	Id string
@@ -39,15 +49,29 @@ type PaxosService[T any] struct {
 	communicator PaxosCommunicator[T]
 	logger *slog.Logger
 
+	// Not always the number of servers we're aware of!
+	PoolSize uint64
+
 	// Have we successfully obtained a quorum for its ballot and is not aware of being superseded yet?
 	IsLeader bool
 	// Ballot we're using to claim leadership
 	LeaderBallot *Ballot
-	LeaderBallotPromisedBy mapset.Set[string]
+	BallotPromisedBy map[Ballot]mapset.Set[string]
+	// Acceptances we've seen while taking leadership
+	PhaseOneAcceptances map[uint64]Slot[T]
 
+	// Highest ballot we've promised
 	PromisedBallot Ballot
+
+	// Highest slot index we've seen or promised
+	HighestSlot uint64
+
+	// What we've accepted, maps slot index -> highest balloted value
 	Acceptances map[uint64]Slot[T]
-	Chosen map[uint64]Slot[T]
+	// Acceptances currently pending
+	PendingAcceptances map[uint64]PendingSlot[T]
+	// Slots already chosen
+	Chosen map[uint64]ChosenSlot[T]
 }
 
 type PaxosCommunicator[T any] interface {
@@ -56,10 +80,26 @@ type PaxosCommunicator[T any] interface {
 	Commit(Slot[T])
 }
 
-func (this *PaxosService[T]) Promise(from string, ballot Ballot, success bool, acceptances []Slot[T]) {
+func (this *PaxosService[T]) QuorumSize() uint64 {
+	return this.PoolSize / 2 + 1
+}
+
+func (this *PaxosService[T]) ReceivePrepare(from string, ballot Ballot) (bool, []Slot[T]) {
+	return false, nil
+}
+
+func (this *PaxosService[T])  ReceiveRequestAcceptance(from string, slot Slot[T]) bool {
+	return false
+}
+
+func (this *PaxosService[T]) ReceivePromise(from string, ballot Ballot, success bool, acceptances []Slot[T]) {
 
 }
 
-func (this *PaxosService[T]) Accept(from string, ballot Ballot, success bool, slotIndex uint64) {
+func (this *PaxosService[T]) ReceiveAccept(from string, ballot Ballot, success bool, slotIndex uint64) {
 	
+}
+
+func (this *PaxosService[T]) ReceiveCommit(from string, slot Slot[T]) {
+
 }
