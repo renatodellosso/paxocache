@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,6 +44,32 @@ func TestRegisterListenerExchangePullsTokenFromListener(t *testing.T) {
 	assert.Equal(t, listener.Token, discovery.Token)
 }
 
+func TestExchangeWithUnionsResponseHosts(t *testing.T) {
+	otherHosts := []string{"ABC", "DEF"}
+	url := "http://127.0.0.1"
+
+	client := MockHttpClient{
+		get: func(actualUrl string, path string, payload any, result any) (int, error) {
+			assert.Equal(t, url, actualUrl)
+			assert.Equal(t, paxocache.EXCHANGE_PATH, path)
+
+			result.(*paxocache.ExchangePayload).KnownHosts = otherHosts
+			return 200, nil
+		},
+	}
+
+	discovery := paxocache.ServerDiscoveryService{
+		KnownHosts: mapset.NewSet("HIJ"),
+		Logger: SilentLogger(),
+		Client: &client,
+	}
+
+	err := discovery.ExchangeWith(url)
+
+	assert.Nil(t, err)
+	assert.ElementsMatch(t, append(otherHosts, "HIJ"), discovery.KnownHosts.ToSlice())
+}
+
 func TestExchangeUnionsKnownHosts(t *testing.T) {
 	listener := paxocache.Listener{
 		Logger: SilentLogger(),
@@ -60,7 +87,7 @@ func TestExchangeUnionsKnownHosts(t *testing.T) {
 	discoveryB.Token = ""
 	discoveryB.KnownHosts.Add("DEF")
 
-	err = discoveryB.ExchangeWith(discoveryA.KnownHosts.ToSlice()[0])
+	err = discoveryB.ExchangeWith(listener.Listener.Addr().String())
 	assert.Nil(t, err)
 
 	assert.ElementsMatch(t, discoveryA.KnownHosts.ToSlice(), discoveryB.KnownHosts.ToSlice())

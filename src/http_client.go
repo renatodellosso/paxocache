@@ -63,12 +63,15 @@ func (this *HttpClient) request(method string, url string, path string, payload 
 
 	// Execute req
 	res, err := this.Client.Do(req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if res != nil {
+			status = res.StatusCode
+		}
+		return status, err
+	}
 
 	this.Logger.Debug("Received response", "method", method, "url", url, "path", path, "status code", res.StatusCode)
-
-	if err != nil {
-		return res.StatusCode, err
-	}
 
 	defer res.Body.Close()
 

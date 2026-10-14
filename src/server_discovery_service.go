@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 
 	mapset "github.com/deckarep/golang-set/v3"
 )
@@ -15,7 +16,8 @@ type ServerDiscoveryService struct {
 	KnownHosts mapset.Set[string]
 	Token      string
 	address net.Addr
-	logger *slog.Logger
+	Logger *slog.Logger
+	Client IHttpClient
 }
 
 type ExchangePayload struct {
@@ -26,15 +28,20 @@ type ExchangePayload struct {
 func NewServerDiscoveryService(logger *slog.Logger) *ServerDiscoveryService {
 	return &ServerDiscoveryService{
 		KnownHosts: mapset.NewSet[string](),
-		logger: logger,
+		Logger: logger,
+		Client: Http("", logger),
 	}
 }
 
 func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 	this.Token = listener.Token
-	this.address = listener.listener.Addr()
+	if client, ok := this.Client.(*HttpClient); ok {
+		client.token = listener.Token
+	}
 
-	this.KnownHosts.Add(listener.listener.Addr().String())
+	this.address = listener.Listener.Addr()
+
+	this.KnownHosts.Add(listener.Listener.Addr().String())
 
 	listener.RegisterRoute(EXCHANGE_PATH, this.handleExchange)
 }
@@ -53,13 +60,17 @@ func (this *ServerDiscoveryService) ExchangeWith(host string) error {
 	if this.KnownHosts.Cardinality() == 0 {
 		return errors.New("Tried to exchange before registering a listener! This is not allowed.")
 	}
+
+	if (!strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://")) {
+		host = "http://" + host
+	}
  
 	var res ExchangePayload
-	_, err := Http(this.Token, this.logger).Get(host, EXCHANGE_PATH, ExchangePayload{
+	_, err := this.Client.Get(host, EXCHANGE_PATH, ExchangePayload{
 		this.KnownHosts.ToSlice(),
 	}, &res)
 
-	this.logger.Info("Received KnownHosts", "hosts", res.KnownHosts)
+	this.Logger.Info("Received KnownHosts", "hosts", res.KnownHosts)
 	this.KnownHosts = this.KnownHosts.Union(mapset.NewSet(res.KnownHosts...))
 
 	return err

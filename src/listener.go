@@ -17,7 +17,7 @@ type Listener struct {
 	Logger *slog.Logger
 
 	// DO NOT ACCESS BEFORE CALLING .Listen()!
-	listener net.Listener
+	Listener net.Listener
 	mux *http.ServeMux
 }
 
@@ -67,7 +67,7 @@ func (this *RequestContext[TReq, TRes]) Respond(code int, res TRes) {
 // Automatically creates a Goroutine to listen in. Blocks until listener is ready
 func (this *Listener) Listen() error {
 	listener, err := net.Listen("tcp", ":"+fmt.Sprint(this.Port))
-	this.listener = listener
+	this.Listener = listener
 
 	if err != nil {
 		return err
