@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	paxocache "paxocache/src"
 	"testing"
 
@@ -65,4 +66,60 @@ func TestListenerStartListeningSuccessfully(t *testing.T) {
 	err := listener.Listen()
 	
 	assert.Nil(t, err)
+}
+
+func TestListenerRejectsMissingToken(t *testing.T) {
+	listener := paxocache.Listener{
+		Logger: SilentLogger(),
+		Token: "abc",
+	}
+
+	failTest := func(ctx paxocache.RequestContext[struct{}, struct{}]) {
+		t.Fail()
+	}
+
+	writer := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1", nil)
+
+	listener.Handle("http://127.0.0.1", failTest, writer, request)
+
+	assert.Equal(t, http.StatusUnauthorized, writer.Result().StatusCode)
+}
+
+func TestListenerRejectsWrongToken(t *testing.T) {
+	listener := paxocache.Listener{
+		Logger: SilentLogger(),
+		Token: "abc",
+	}
+
+	failTest := func(ctx paxocache.RequestContext[struct{}, struct{}]) {
+		t.Fail()
+	}
+
+	writer := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1", nil)
+	request.Header.Set(paxocache.TOKEN_HEADER, "wrong-token")
+
+	listener.Handle("http://127.0.0.1", failTest, writer, request)
+
+	assert.Equal(t, http.StatusUnauthorized, writer.Result().StatusCode)
+}
+
+func TestListenerAcceptsCorrectToken(t *testing.T) {
+	listener := paxocache.Listener{
+		Logger: SilentLogger(),
+		Token: "abc",
+	}
+
+	failTest := func(ctx paxocache.RequestContext[struct{}, struct{}]) {
+		ctx.Respond(http.StatusOK, struct{}{})
+	}
+
+	writer := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1", nil)
+	request.Header.Set(paxocache.TOKEN_HEADER, listener.Token)
+
+	listener.Handle("http://127.0.0.1", failTest, writer, request)
+
+	assert.Equal(t, http.StatusOK, writer.Result().StatusCode)
 }

@@ -2,6 +2,7 @@ package paxocache
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 )
+
+const TOKEN_HEADER = "Bearer-Token"
 
 type Listener struct {
 	// Set to 0 to automatically choose
@@ -43,7 +46,7 @@ func (this *RequestContext[TReq, TRes]) DecodeBody() (TReq, error) {
 func (this *RequestContext[TReq, TRes]) respondWithAny(code int, payload any) {
 	this.writer.Header().Set("Content-Type", "application/json")
 
-	err := json.NewEncoder(this.writer).Encode(payload)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		this.writer.WriteHeader(http.StatusInternalServerError)
 		this.logger.Error("Error encoding payload", "path", this.path, "status code", code, "payload", payload)
@@ -51,7 +54,11 @@ func (this *RequestContext[TReq, TRes]) respondWithAny(code int, payload any) {
 		return
 	}
 
+	// Writing the body must come last!
 	this.writer.WriteHeader(code)
+	if _, err := this.writer.Write(body); err != nil {
+		this.logger.Error("Error writing marshaled body to response", "error", err)
+	}
 }
 
 func (this *RequestContext[TReq, TRes]) RespondWithError(code int, err error) {
@@ -92,17 +99,33 @@ func (this *Listener) Listen() error {
 	return nil
 }
 
-func (this *Listener) RegisterRoute[TReq any, TRes any](path string, handler func(ctx RequestContext[TReq, TRes])) {
-	handle := func(writer http.ResponseWriter, req *http.Request) {
-		ctx := RequestContext[TReq, TRes]{
+func (this *Listener) Handle[TReq any, TRes any](path string, handler func(ctx RequestContext[TReq, TRes]), writer http.ResponseWriter, req *http.Request) {
+	ctx := RequestContext[TReq, TRes]{
 			path: path,
 			Req: req,
 			writer: writer,
 			logger: this.Logger,
 		}
 
+		// Handle auth
+		token := req.Header.Get(TOKEN_HEADER)
+		if (token == "" && this.Token != "") {
+			ctx.RespondWithError(http.StatusUnauthorized, errors.New("No token sent"))
+			return
+		}
+
+		if token != this.Token {
+			ctx.RespondWithError(http.StatusUnauthorized, errors.New("Token did not match"))
+			return
+		}
+
 		handler(ctx)
+}
+
+func (this *Listener) RegisterRoute[TReq any, TRes any](path string, handler func(ctx RequestContext[TReq, TRes])) {
+	handle := func(writer http.ResponseWriter, req *http.Request) {
+		this.Handle(path, handler, writer, req)
 	}
 
-	this.mux.HandleFunc(EXCHANGE_PATH, handle)
+	this.mux.HandleFunc(path, handle)
 }

@@ -59,7 +59,7 @@ func (this *HttpClient) request(method string, url string, path string, payload 
 	req.Header.Set("User-Agent", "Go-HTTP-Client/1.1")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Bearer-Token", this.token)
+	req.Header.Set(TOKEN_HEADER, this.token)
 
 	// Execute req
 	res, err := this.Client.Do(req)
