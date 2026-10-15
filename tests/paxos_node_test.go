@@ -347,6 +347,7 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 		Number: 1,
 		OwnerId: node.Id,
 	}
+	node.LeaderBallot = &ballot
 
 	slotA := paxocache.Slot[any]{
 		Number: 0,
@@ -367,10 +368,7 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	node.PhaseOneAcceptances[slotA.Number] = slotA
 	node.PhaseOneAcceptances[slotB.Number] = slotB
 
-	node.ReceivePromise(node.Id, paxocache.Ballot{
-		Number: 0,
-		OwnerId: node.Id,
-	}, true, []paxocache.Slot[any]{slotB, slotC, {
+	node.ReceivePromise(node.Id, ballot, true, []paxocache.Slot[any]{slotB, slotC, {
 		Number: 0,
 		Ballot: paxocache.Ballot{},
 		Val: -123,
@@ -380,4 +378,64 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	assert.Equal(t, slotA, node.PhaseOneAcceptances[slotA.Number])
 	assert.Equal(t, slotB, node.PhaseOneAcceptances[slotB.Number])
 	assert.Equal(t, slotC, node.PhaseOneAcceptances[slotC.Number])
+}
+
+func TestReceiveAcceptAddsToAcceptedBy(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	node := paxocache.NewPaxosNode("id", client, SilentLogger())
+	node.PoolSize = 99 // Ensure we don't commit
+
+	slot := paxocache.Slot[any]{
+		Number: 0,
+		Ballot: paxocache.Ballot{},
+		Val: 123,
+	}
+	node.PendingAcceptances[slot.Number] = paxocache.PendingSlot[any]{
+		Proposal: slot,
+		AcceptedBy: mapset.NewSet[string](),
+	}
+
+	node.ReceiveAccept(node.Id, slot.Ballot, true, slot.Number)
+
+	assert.ElementsMatch(t, []string{node.Id}, node.PendingAcceptances[slot.Number].AcceptedBy.ToSlice())
+}
+
+func TestReceiveAcceptCommitsIfQuorumHasAccepted(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	node := paxocache.NewPaxosNode("id", client, SilentLogger())
+	node.PoolSize = 1 // Ensure we don't commit
+
+	slot := paxocache.Slot[any]{
+		Number: 0,
+		Ballot: paxocache.Ballot{},
+		Val: 123,
+	}
+	node.PendingAcceptances[slot.Number] = paxocache.PendingSlot[any]{
+		Proposal: slot,
+		AcceptedBy: mapset.NewSet[string](),
+	}
+
+	client.On("Commit", slot)
+
+	node.ReceiveAccept(node.Id, slot.Ballot, true, slot.Number)
+
+	client.AssertExpectations(t)
+}
+
+func TestReceiveCommitAddsToChosen(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	node := paxocache.NewPaxosNode("id", client, SilentLogger())
+
+	slot := paxocache.Slot[any]{
+		Number: 0,
+		Ballot: paxocache.Ballot{},
+		Val: 123,
+	}
+
+	node.ReceiveCommit(node.Id, slot)
+
+	assert.Equal(t, paxocache.ChosenSlot[any]{
+		Number: slot.Number,
+		Val: slot.Val,
+	}, node.Chosen[slot.Number])
 }

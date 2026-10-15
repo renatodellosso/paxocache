@@ -110,8 +110,14 @@ func (this *PaxosNode[T]) QuorumSize() uint64 {
 }
 
 func (this *PaxosNode[T]) TryTakeLeadership() {
+	nextBallot := this.PromisedBallot.Number + 1
+	if this.LeaderBallot != nil && this.LeaderBallot.Number > this.PromisedBallot.Number {
+		nextBallot = this.LeaderBallot.Number + 1
+	}
+
+	this.IsLeader = false
 	this.LeaderBallot = &Ballot{
-		Number: this.PromisedBallot.Number + 1,
+		Number: nextBallot,
 		OwnerId: this.Id,
 	}
 	this.BallotPromisedBy = mapset.NewSet[string]()
@@ -130,13 +136,30 @@ func (this *PaxosNode[T]) GainLeadership() {
 		val.Ballot = *this.LeaderBallot
 		this.PendingAcceptances[val.Number] = PendingSlot[T] {
 			Proposal: val,
-			AcceptedBy: mapset.NewSet(this.Id),
+			AcceptedBy: mapset.NewSet[string](),
 		}
 
 		// Try to choose things already accepted
 		this.client.RequestAcceptance(val)
 	}
 	this.PhaseOneAcceptances = make(map[uint64]Slot[T])
+}
+
+// Returns whether we lost leadership
+func (this *PaxosNode[T]) promiseBallot(ballot Ballot) bool {
+	this.logger.Debug("promiseBallot", "id", this.Id, "IsLeader", this.IsLeader, "ballot", ballot, "previous", this.PromisedBallot)
+
+	if this.PromisedBallot.GreaterThan(ballot) {
+		return false // Never promise a lower ballot
+	}
+
+	this.PromisedBallot = ballot
+	if this.LeaderBallot != nil && this.PromisedBallot.GreaterThan(*this.LeaderBallot) {
+		this.IsLeader = false
+		return true
+	}
+
+	return false
 }
 
 // Returns (success, acceptances)
@@ -146,7 +169,7 @@ func (this *PaxosNode[T]) ReceivePrepare(from string, ballot Ballot) (bool, map[
 		return false, nil
 	}
 
-	this.PromisedBallot = ballot
+	this.promiseBallot(ballot)
 
 	this.logger.Debug("ReceivePrepare", "id", this.Id, "from", from, "ballot", ballot, "success", true, "acceptances", this.Acceptances)
 	return true, this.Acceptances
@@ -160,7 +183,7 @@ func (this *PaxosNode[T])  ReceiveRequestAcceptance(from string, slot Slot[T]) b
 
 	this.Acceptances[slot.Number] = slot
 	// Never accept anything below this ballot now
-	this.PromisedBallot = slot.Ballot
+	this.promiseBallot(slot.Ballot)
 
 	this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "from", from, "ballot", slot.Ballot, "slot", slot, "success", true)
 	
@@ -170,7 +193,7 @@ func (this *PaxosNode[T])  ReceiveRequestAcceptance(from string, slot Slot[T]) b
 func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success bool, acceptances []Slot[T]) {
 	this.logger.Debug("ReceivePromise", "id", this.Id, "from", from, "ballot", ballot, "success", success, "acceptances", acceptances)
 	
-	if !success || this.LeaderBallot != nil && ballot != *this.LeaderBallot {
+	if !success || this.PromisedBallot.GreaterThan(ballot) || this.LeaderBallot == nil || ballot != *this.LeaderBallot || this.BallotPromisedBy.Cardinality() >= int(this.QuorumSize()) {
 		return
 	}
 
@@ -190,9 +213,24 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 }
 
 func (this *PaxosNode[T]) ReceiveAccept(from string, ballot Ballot, success bool, slotIndex uint64) {
+	this.logger.Debug("ReceiveAccept", "id", this.Id, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
 	
+	if this.promiseBallot(ballot) {
+		return
+	}
+
+	this.PendingAcceptances[slotIndex].AcceptedBy.Add(from)
+	if this.PendingAcceptances[slotIndex].AcceptedBy.Cardinality() >= int(this.QuorumSize()) {
+		this.client.Commit(this.PendingAcceptances[slotIndex].Proposal)
+	}
 }
 
 func (this *PaxosNode[T]) ReceiveCommit(from string, slot Slot[T]) {
+	this.logger.Debug("ReceiveCommit", "id", this.Id, "from", from, "slot", slot)
 
+	delete(this.PendingAcceptances, slot.Number)
+	this.Chosen[slot.Number] = ChosenSlot[T]{
+		Number: slot.Number,
+		Val: slot.Val,
+	}
 }
