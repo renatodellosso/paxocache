@@ -7,6 +7,16 @@ import (
 	mapset "github.com/deckarep/golang-set/v3"
 )
 
+const PAXOS_PREPARE_ROUTE = "/cache/prepare"
+const PAXOS_REQUEST_ACCEPTANCE_ROUTE = "/cache/request-acceptance"
+const PAXOS_COMMIT_ROUTE = "/paxos/commit"
+
+type PaxosClient[T any] interface {
+	Prepare(Ballot)
+	RequestAcceptance(Slot[T])
+	Commit(Slot[T])
+}
+
 // Should be comparable by default
 type Ballot struct {
 	Number uint64
@@ -78,12 +88,6 @@ type PaxosNode[T any] struct {
 	PendingAcceptances map[uint64]PendingSlot[T]
 	// Slots already chosen
 	Chosen map[uint64]ChosenSlot[T]
-}
-
-type PaxosClient[T any] interface {
-	Prepare(Ballot)
-	RequestAcceptance(Slot[T])
-	Commit(Slot[T])
 }
 
 func NewPaxosNode[T any](id string, client PaxosClient[T], logger *slog.Logger) *PaxosNode[T] {
