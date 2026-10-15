@@ -194,6 +194,7 @@ func (this *PaxosNode[T])  ReceiveRequestAcceptance(from string, slot Slot[T]) b
 	return true
 }
 
+// Response from sending Prepare
 func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success bool, acceptances []Slot[T]) {
 	this.logger.Debug("ReceivePromise", "id", this.Id, "from", from, "ballot", ballot, "success", success, "acceptances", acceptances)
 	
@@ -216,6 +217,7 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 	}
 }
 
+// Response from sending RequestAcceptance
 func (this *PaxosNode[T]) ReceiveAccept(from string, ballot Ballot, success bool, slotIndex uint64) {
 	this.logger.Debug("ReceiveAccept", "id", this.Id, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
 	
