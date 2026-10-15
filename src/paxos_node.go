@@ -215,7 +215,12 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 func (this *PaxosNode[T]) ReceiveAccept(from string, ballot Ballot, success bool, slotIndex uint64) {
 	this.logger.Debug("ReceiveAccept", "id", this.Id, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
 	
-	if this.promiseBallot(ballot) {
+	if !success || this.promiseBallot(ballot) {
+		return
+	}
+
+	pending, ok := this.PendingAcceptances[slotIndex]
+	if !ok || pending.AcceptedBy.Cardinality() >= int(this.QuorumSize()) || this.PendingAcceptances[slotIndex].Proposal.Ballot != ballot {
 		return
 	}
 
