@@ -122,10 +122,10 @@ func (this *Listener) Handle[TReq any, TRes any](path string, handler func(ctx R
 		handler(ctx)
 }
 
-func (this *Listener) RegisterRoute[TReq any, TRes any](path string, handler func(ctx RequestContext[TReq, TRes])) {
+func (this *Listener) RegisterRoute[TReq any, TRes any](method string, path string, handler func(ctx RequestContext[TReq, TRes])) {
 	handle := func(writer http.ResponseWriter, req *http.Request) {
 		this.Handle(path, handler, writer, req)
 	}
 
-	this.mux.HandleFunc(path, handle)
+	this.mux.HandleFunc(method + " " + path, handle)
 }

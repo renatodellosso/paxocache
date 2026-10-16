@@ -4,12 +4,18 @@ import (
 	"log/slog"
 )
 
+type WithFrom[T any] struct {
+	from string
+	val T
+}
+
 type HttpPaxosClient[T any] struct {
 	client IHttpClient
 	logger *slog.Logger
 
-	getRecipients func() []string
 	node *PaxosNode[T]
+
+	getRecipients func() []string
 }
 
 type PromisePayload[T any] struct {
@@ -19,7 +25,7 @@ type PromisePayload[T any] struct {
 	acceptances []Slot[T]
 }
 
-type AcceptPaylost[T any] struct {
+type AcceptPayload[T any] struct {
 	from string
 	ballot Ballot
 	success bool
@@ -32,10 +38,17 @@ func (this *HttpPaxosClient[T]) forEachRecipient(f func(string)) {
 	}
 }
 
+func (this *HttpPaxosClient[T]) withFrom(payload any) WithFrom[any] {
+	return WithFrom[any] {
+		val: payload,
+		from: this.node.Id,
+	}
+}
+
 func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
 	send := func(host string) {
 		var res PromisePayload[T]
-		this.client.Post(host, PAXOS_PREPARE_ROUTE, ballot, &res)
+		this.client.Post(host, PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
 
 		this.node.ReceivePromise(res.from, res.ballot, res.success, res.acceptances)
 	}
@@ -45,8 +58,8 @@ func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
 
 func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
 	send := func(host string) {
-		var res AcceptPaylost[T]
-		this.client.Post(host, PAXOS_COMMIT_ROUTE, slot, &res)
+		var res AcceptPayload[T]
+		this.client.Post(host, PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 
 		this.node.ReceiveAccept(res.from, res.ballot, res.success, res.slotIndex)
 	}
@@ -57,7 +70,7 @@ func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
 func (this *HttpPaxosClient[T]) Commit(slot Slot[T]) {
 	send := func(host string) {
 		var res any
-		this.client.Post(host, PAXOS_COMMIT_ROUTE, slot, &res)
+		this.client.Post(host, PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 	}
 	
 	this.forEachRecipient(send)

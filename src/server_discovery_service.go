@@ -34,6 +34,8 @@ func NewServerDiscoveryService(logger *slog.Logger) *ServerDiscoveryService {
 }
 
 func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
+	this.Logger.Debug("Registering server discovery with listener...")
+
 	this.Token = listener.Token
 	if client, ok := this.Client.(*HttpClient); ok {
 		client.token = listener.Token
@@ -42,7 +44,7 @@ func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 	this.address = listener.Listener.Addr().String()
 	this.KnownHosts.Add(listener.Listener.Addr().String())
 
-	listener.RegisterRoute(EXCHANGE_PATH, this.handleExchange)
+	listener.RegisterRoute(http.MethodPost, EXCHANGE_PATH, this.handleExchange)
 }
 
 func (this *ServerDiscoveryService) handleExchange(ctx RequestContext[ExchangePayload, ExchangePayload]) {
@@ -66,7 +68,7 @@ func (this *ServerDiscoveryService) ExchangeWith(host string, contactNewHosts bo
 	}
  
 	var res ExchangePayload
-	_, err := this.Client.Get(host, EXCHANGE_PATH, ExchangePayload{
+	_, err := this.Client.Post(host, EXCHANGE_PATH, ExchangePayload{
 		this.KnownHosts.ToSlice(),
 		this.address,
 	}, &res)

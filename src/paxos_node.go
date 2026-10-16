@@ -60,6 +60,7 @@ type ChosenSlot[T any] struct {
 // Handles Multipaxos for one log
 type PaxosNode[T any] struct {
 	Id string
+	Partition string
 
 	client PaxosClient[T]
 	logger *slog.Logger
@@ -90,9 +91,10 @@ type PaxosNode[T any] struct {
 	Chosen map[uint64]ChosenSlot[T]
 }
 
-func NewPaxosNode[T any](id string, client PaxosClient[T], logger *slog.Logger) *PaxosNode[T] {
+func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], logger *slog.Logger) *PaxosNode[T] {
 	return &PaxosNode[T]{
 		Id: id,
+		Partition: partition,
 
 		client: client,
 		logger: logger,
