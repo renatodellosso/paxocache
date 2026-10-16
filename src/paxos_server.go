@@ -30,8 +30,8 @@ func (this *PaxosServer[T]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], P
 		return
 	}
 
-	ballot := payload.val
-	success, acceptances := node.ReceivePrepare(payload.from, ballot)
+	ballot := payload.Val
+	success, acceptances := node.ReceivePrepare(payload.From, ballot)
 
 	ctx.Respond(http.StatusOK, PromisePayload[T]{
 		from: node.Id,
@@ -57,13 +57,13 @@ func (this *PaxosServer[T]) HandleRequestAcceptance(ctx RequestContext[WithFrom[
 		return
 	}
 
-	success := node.ReceiveRequestAcceptance(payload.from, payload.val)
+	success := node.ReceiveRequestAcceptance(payload.From, payload.Val)
 
 	ctx.Respond(http.StatusOK, AcceptPayload[T]{
 		from: node.Id,
 		ballot: node.PromisedBallot,
 		success: success,
-		slotIndex: payload.val.Number,
+		slotIndex: payload.Val.Number,
 	})
 }
 
@@ -83,7 +83,7 @@ func (this *PaxosServer[T]) HandleCommit(ctx RequestContext[WithFrom[Slot[T]], a
 		return
 	}
 
-	node.ReceiveCommit(payload.from, payload.val)
+	node.ReceiveCommit(payload.From, payload.Val)
 
 	ctx.Respond(http.StatusOK, nil)
 }

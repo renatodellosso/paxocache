@@ -4,9 +4,11 @@ import (
 	"log/slog"
 )
 
+// Must export fields for JSON to serialize them!
+
 type WithFrom[T any] struct {
-	from string
-	val T
+	From string
+	Val T
 }
 
 type HttpPaxosClient[T any] struct {
@@ -40,8 +42,8 @@ func (this *HttpPaxosClient[T]) forEachRecipient(f func(string)) {
 
 func (this *HttpPaxosClient[T]) withFrom(payload any) WithFrom[any] {
 	return WithFrom[any] {
-		val: payload,
-		from: this.node.Id,
+		Val: payload,
+		From: this.node.Id,
 	}
 }
 
@@ -59,7 +61,7 @@ func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
 func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
 	send := func(host string) {
 		var res AcceptPayload[T]
-		this.client.Post(host, PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
+		this.client.Post(host, PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 
 		this.node.ReceiveAccept(res.from, res.ballot, res.success, res.slotIndex)
 	}
