@@ -73,10 +73,13 @@ type PaxosNode[T any] struct {
 	IsLeader bool
 	// Ballot we're using to claim leadership
 	LeaderBallot *Ballot
+	// Our pool for determining current leadership
+	LeadershipVoters mapset.Set[string]
 	// Who's promised our latest leader ballot
 	BallotPromisedBy mapset.Set[string]
 	// Acceptances we've seen while taking leadership
 	PhaseOneAcceptances map[uint64]Slot[T]
+	RecoveredSlots mapset.Set[uint64]
 
 	// Highest ballot we've promised
 	PromisedBallot Ballot
@@ -102,8 +105,10 @@ func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], log
 
 		Pools: make(map[uint64]mapset.Set[string]),
 
+		LeadershipVoters: mapset.NewSet[string](),
 		BallotPromisedBy: mapset.NewSet[string](),
 		PhaseOneAcceptances: make(map[uint64]Slot[T]),
+		RecoveredSlots: mapset.NewSet[uint64](),
 
 		Acceptances: make(map[uint64]Slot[T]),
 		PendingAcceptances: make(map[uint64]PendingSlot[T]),
@@ -134,6 +139,11 @@ func (this *PaxosNode[T]) IsInPool(slot uint64, id string) bool {
 }
 
 func (this *PaxosNode[T]) TryTakeLeadership() {
+	if _, ok := this.Pools[this.HighestSlot]; !ok {
+		this.logger.Error("PaxosNode tried to take leadership, but had no pool!", this.Id, this.HighestSlot)
+		return
+	}
+
 	nextBallot := this.PromisedBallot.Number + 1
 	if this.LeaderBallot != nil && this.LeaderBallot.Number > this.PromisedBallot.Number {
 		nextBallot = this.LeaderBallot.Number + 1
@@ -144,8 +154,11 @@ func (this *PaxosNode[T]) TryTakeLeadership() {
 		Number: nextBallot,
 		OwnerId: this.Id,
 	}
+
+	this.LeadershipVoters = this.Pools[this.HighestSlot]
 	this.BallotPromisedBy = mapset.NewSet[string]()
 	this.PhaseOneAcceptances = make(map[uint64]Slot[T])
+	this.RecoveredSlots = mapset.NewSet[uint64]()
 
 	this.logger.Debug("TakeLeadership", "id", this.Id, "ballot", this.LeaderBallot)
 
@@ -210,27 +223,28 @@ func (this *PaxosNode[T]) ReceiveRequestAcceptance(from string, slot Slot[T]) bo
 func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success bool, acceptances []Slot[T]) {
 	this.logger.Debug("ReceivePromise", "id", this.Id, "from", from, "ballot", ballot, "success", success, "acceptances", acceptances)
 	
-	if !success || this.PromisedBallot.GreaterThan(ballot) || this.LeaderBallot == nil || ballot != *this.LeaderBallot || this.BallotPromisedBy.Cardinality() >= this.QuorumSize(this.HighestSlot) {
+	if !success || this.LeaderBallot == nil || this.PromisedBallot.GreaterThan(*this.LeaderBallot) || ballot != *this.LeaderBallot {
 		return
 	}
 
+	// Might be older than our current voter pool, but we still need it for recovery
 	this.BallotPromisedBy.Add(from)
 	
 	for _, val := range acceptances {
 		// If val has a higher ballot or is the first we've seen, record it
-		if prev, ok := this.PhaseOneAcceptances[val.Number]; !ok || val.Ballot.GreaterThan(prev.Ballot) {
+		if prev, ok := this.PhaseOneAcceptances[val.Number]; !this.RecoveredSlots.Contains(val.Number) && (!ok || val.Ballot.GreaterThan(prev.Ballot)) {
 			this.PhaseOneAcceptances[val.Number] = val
 		}
 	}
 
-	if this.BallotPromisedBy.Cardinality() >= this.QuorumSize(this.HighestSlot) {
+	if this.BallotPromisedBy.Intersect(this.LeadershipVoters).Cardinality() >= this.LeadershipVoters.Cardinality() / 2 + 1 {
 		// We're the leader!
 		this.GainLeadership()
 	}
 
 	// Convert phase 1 acceptances into pending acceptances
 	for num, val := range this.PhaseOneAcceptances {
-		if this.Pools[num].Intersect(this.BallotPromisedBy).Cardinality() < this.QuorumSize(num) {
+		if pool, ok := this.Pools[num]; !ok || pool.Intersect(this.BallotPromisedBy).Cardinality() < this.QuorumSize(num) {
 			continue
 		}
 
@@ -240,6 +254,7 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 			AcceptedBy: mapset.NewSet[string](),
 		}
 		delete(this.PhaseOneAcceptances, num)
+		this.RecoveredSlots.Add(num)
 
 		// Try to choose things already accepted
 		this.client.RequestAcceptance(val)
