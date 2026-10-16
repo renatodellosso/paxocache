@@ -86,16 +86,6 @@ func TestTryTakeLeadershipCallsPrepare(t *testing.T) {
 	client.AssertExpectations(t)
 }
 
-func TestGainLeadershipUpdatesState(t *testing.T) {
-	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
-
-	node.GainLeadership()
-
-	assert.True(t, node.IsLeader)
-	assert.Equal(t, 0, len(node.PhaseOneAcceptances))
-}
-
 func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
 	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
@@ -111,7 +101,7 @@ func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 		OwnerId: "B",
 	}
 
-	success, acceptances := node.ReceivePrepare(ballot.OwnerId, ballot)
+	success, acceptances, _ := node.ReceivePrepare(ballot.OwnerId, ballot)
 
 	assert.False(t, success)
 	assert.Nil(t, acceptances)
@@ -122,7 +112,7 @@ func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 		OwnerId: "A",
 	}
 
-	success, acceptances = node.ReceivePrepare(ballot.OwnerId, ballot)
+	success, acceptances, _ = node.ReceivePrepare(ballot.OwnerId, ballot)
 
 	assert.False(t, success)
 	assert.Nil(t, acceptances)
@@ -142,7 +132,7 @@ func TestReceivePrepareSucceedsIfNoHigherBallotHasBeenPromised(t *testing.T) {
 		OwnerId: "B",
 	}
 
-	success, acceptances := node.ReceivePrepare(ballot.OwnerId, ballot)
+	success, acceptances, _ := node.ReceivePrepare(ballot.OwnerId, ballot)
 
 	assert.True(t, success)
 	assert.NotNil(t, acceptances)
@@ -167,7 +157,7 @@ func TestReceivePrepareReturnsAcceptancesOnSuccess(t *testing.T) {
 		OwnerId: "A",
 	}
 
-	_, acceptances := node.ReceivePrepare(ballot.OwnerId, ballot)
+	_, acceptances, _ := node.ReceivePrepare(ballot.OwnerId, ballot)
 
 	assert.Equal(t, node.Acceptances, acceptances)
 }
@@ -182,7 +172,7 @@ func TestReceiveRequestAcceptanceRejectsIfAHigherBallotHasBeenPromised(t *testin
 	}
 	node.PromisedBallot = ballot
 
-	success := node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
+	success, _ := node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
 		Ballot: paxocache.Ballot{
 			Number: 1,
 			OwnerId: node.Id,
@@ -208,7 +198,7 @@ func TestReceiveRequestAcceptanceSucceedsIfNoHigherBallotHasBeenPromised(t *test
 	}
 	node.PromisedBallot = ballot
 
-	success := node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
+	success, _ := node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
 		Ballot: paxocache.Ballot{
 			Number: 2,
 			OwnerId: node.Id,

@@ -3,7 +3,9 @@ package paxocache
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
+	"sync"
 
 	mapset "github.com/deckarep/golang-set/v3"
 )
@@ -63,6 +65,8 @@ type PaxosNode[T any] struct {
 	Id string
 	Partition string
 
+	mutex sync.Mutex
+
 	client PaxosClient[T]
 	logger *slog.Logger
 
@@ -120,7 +124,8 @@ func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], log
 	return &node
 }
 
-func (this *PaxosNode[T]) QuorumSize(slot uint64) int {
+// Lock beforehand
+func (this *PaxosNode[T]) quorumSize(slot uint64) int {
 	pool, ok := this.Pools[slot]
 	if !ok {
 		return math.MaxInt
@@ -129,7 +134,8 @@ func (this *PaxosNode[T]) QuorumSize(slot uint64) int {
 	return pool.Cardinality() / 2 + 1
 }
 
-func (this *PaxosNode[T]) IsInPool(slot uint64, id string) bool {
+// Lock beforehand
+func (this *PaxosNode[T]) isInPool(slot uint64, id string) bool {
 	pool, ok := this.Pools[slot]
 	if !ok {
 		return false
@@ -139,8 +145,11 @@ func (this *PaxosNode[T]) IsInPool(slot uint64, id string) bool {
 }
 
 func (this *PaxosNode[T]) TryTakeLeadership() {
+	this.mutex.Lock()
+
 	if _, ok := this.Pools[this.HighestSlot]; !ok {
 		this.logger.Error("PaxosNode tried to take leadership, but had no pool!", this.Id, this.HighestSlot)
+		this.mutex.Unlock()
 		return
 	}
 
@@ -162,14 +171,18 @@ func (this *PaxosNode[T]) TryTakeLeadership() {
 
 	this.logger.Debug("TakeLeadership", "id", this.Id, "ballot", this.LeaderBallot)
 
-	this.client.Prepare(*this.LeaderBallot)
+	leaderBallot := *this.LeaderBallot
+	this.mutex.Unlock() // Unlock before outgoing messages with client
+
+	this.client.Prepare(leaderBallot)
 }
 
-func (this *PaxosNode[T]) GainLeadership() {
+// Lock before calling
+func (this *PaxosNode[T]) gainLeadership() {
 	this.IsLeader = true
 }
 
-// Returns whether we lost leadership
+// Returns whether we lost leadership. Lock beforehand
 func (this *PaxosNode[T]) promiseBallot(ballot Ballot) bool {
 	this.logger.Debug("promiseBallot", "id", this.Id, "IsLeader", this.IsLeader, "ballot", ballot, "previous", this.PromisedBallot)
 
@@ -186,28 +199,34 @@ func (this *PaxosNode[T]) promiseBallot(ballot Ballot) bool {
 	return false
 }
 
-// Returns (success, acceptances)
-func (this *PaxosNode[T]) ReceivePrepare(from string, ballot Ballot) (bool, map[uint64]Slot[T]) {
+// Returns (success, acceptances, promised ballot)
+func (this *PaxosNode[T]) ReceivePrepare(from string, ballot Ballot) (bool, map[uint64]Slot[T], Ballot) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	
 	if this.PromisedBallot.GreaterThan(ballot) {
 		this.logger.Debug("ReceivePrepare", "id", this.Id, "from", from, "ballot", ballot, "success", false, "acceptances", nil)
-		return false, nil
+		return false, nil, this.PromisedBallot
 	}
 
 	this.promiseBallot(ballot)
 
 	this.logger.Debug("ReceivePrepare", "id", this.Id, "from", from, "ballot", ballot, "success", true, "acceptances", this.Acceptances)
-	return true, this.Acceptances
+	return true, maps.Clone(this.Acceptances), this.PromisedBallot // Return a fixed snapshot of acceptances
 }
 
-func (this *PaxosNode[T]) ReceiveRequestAcceptance(from string, slot Slot[T]) bool {
+func (this *PaxosNode[T]) ReceiveRequestAcceptance(from string, slot Slot[T]) (bool, Ballot) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
 	if this.PromisedBallot.GreaterThan(slot.Ballot) {
 		this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "from", from, "ballot", slot.Ballot, "slot", slot, "success", false, "reason", "Promised higher ballot")
-		return false
+		return false, this.PromisedBallot
 	}
 
-	if !this.IsInPool(slot.Number, this.Id) {
+	if !this.isInPool(slot.Number, this.Id) {
 		this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "from", from, "ballot", slot.Ballot, "slot", slot, "success", false, "reason", "Not in pool for that slot")
-		return false
+		return false, this.PromisedBallot
 	}
 
 	this.Acceptances[slot.Number] = slot
@@ -216,14 +235,17 @@ func (this *PaxosNode[T]) ReceiveRequestAcceptance(from string, slot Slot[T]) bo
 
 	this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "from", from, "ballot", slot.Ballot, "slot", slot, "success", true)
 	
-	return true
+	return true, this.PromisedBallot
 }
 
 // Response from sending Prepare
 func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success bool, acceptances []Slot[T]) {
+	this.mutex.Lock()
+
 	this.logger.Debug("ReceivePromise", "id", this.Id, "from", from, "ballot", ballot, "success", success, "acceptances", acceptances)
 	
 	if !success || this.LeaderBallot == nil || this.PromisedBallot.GreaterThan(*this.LeaderBallot) || ballot != *this.LeaderBallot {
+		this.mutex.Unlock() // Make sure to unlock!
 		return
 	}
 
@@ -239,12 +261,13 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 
 	if this.BallotPromisedBy.Intersect(this.LeadershipVoters).Cardinality() >= this.LeadershipVoters.Cardinality() / 2 + 1 {
 		// We're the leader!
-		this.GainLeadership()
+		this.gainLeadership()
 	}
 
 	// Convert phase 1 acceptances into pending acceptances
+	toRequest := []Slot[T]{}
 	for num, val := range this.PhaseOneAcceptances {
-		if pool, ok := this.Pools[num]; !ok || pool.Intersect(this.BallotPromisedBy).Cardinality() < this.QuorumSize(num) {
+		if pool, ok := this.Pools[num]; !ok || pool.Intersect(this.BallotPromisedBy).Cardinality() < this.quorumSize(num) {
 			continue
 		}
 
@@ -256,31 +279,49 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 		delete(this.PhaseOneAcceptances, num)
 		this.RecoveredSlots.Add(num)
 
-		// Try to choose things already accepted
-		this.client.RequestAcceptance(val)
+		toRequest = append(toRequest, val)
+	}
+
+	this.mutex.Unlock()
+
+	// Try to choose things already accepted
+	for _, slot := range toRequest {
+		this.client.RequestAcceptance(slot)
 	}
 }
 
 // Response from sending RequestAcceptance
 func (this *PaxosNode[T]) ReceiveAccept(from string, ballot Ballot, success bool, slotIndex uint64) {
+	this.mutex.Lock()
+	
 	this.logger.Debug("ReceiveAccept", "id", this.Id, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
 	
-	if !success || this.promiseBallot(ballot) || !this.IsInPool(slotIndex, from) {
+	if !success || this.promiseBallot(ballot) || !this.isInPool(slotIndex, from) {
+		this.mutex.Unlock()
 		return
 	}
 
 	pending, ok := this.PendingAcceptances[slotIndex]
-	if !ok || pending.AcceptedBy.Cardinality() >= this.QuorumSize(slotIndex) || this.PendingAcceptances[slotIndex].Proposal.Ballot != ballot {
+	if !ok || pending.AcceptedBy.Cardinality() >= this.quorumSize(slotIndex) || this.PendingAcceptances[slotIndex].Proposal.Ballot != ballot {
+		this.mutex.Unlock()
 		return
 	}
 
 	this.PendingAcceptances[slotIndex].AcceptedBy.Add(from)
-	if this.PendingAcceptances[slotIndex].AcceptedBy.Cardinality() >= this.QuorumSize(slotIndex) {
-		this.client.Commit(this.PendingAcceptances[slotIndex].Proposal)
+	if this.PendingAcceptances[slotIndex].AcceptedBy.Cardinality() < this.quorumSize(slotIndex) {
+		this.mutex.Unlock()
+		return
 	}
+
+	proposal := this.PendingAcceptances[slotIndex].Proposal
+	this.mutex.Unlock()
+	this.client.Commit(proposal) // No reading fields after unlocking!
 }
 
 func (this *PaxosNode[T]) ReceiveCommit(from string, slot Slot[T]) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
 	this.logger.Debug("ReceiveCommit", "id", this.Id, "from", from, "slot", slot)
 
 	delete(this.PendingAcceptances, slot.Number)

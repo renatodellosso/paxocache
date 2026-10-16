@@ -31,11 +31,11 @@ func (this *PaxosServer[T]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], P
 	}
 
 	ballot := payload.Val
-	success, acceptances := node.ReceivePrepare(payload.From, ballot)
+	success, acceptances, promisedBallot := node.ReceivePrepare(payload.From, ballot)
 
 	ctx.Respond(http.StatusOK, PromisePayload[T]{
 		from: node.Id,
-		ballot: node.PromisedBallot,
+		ballot: promisedBallot,
 		success: success,
 		acceptances: slices.Collect(maps.Values(acceptances)),
 	})
@@ -57,11 +57,11 @@ func (this *PaxosServer[T]) HandleRequestAcceptance(ctx RequestContext[WithFrom[
 		return
 	}
 
-	success := node.ReceiveRequestAcceptance(payload.From, payload.Val)
+	success, promisedBallot := node.ReceiveRequestAcceptance(payload.From, payload.Val)
 
 	ctx.Respond(http.StatusOK, AcceptPayload[T]{
 		from: node.Id,
-		ballot: node.PromisedBallot,
+		ballot: promisedBallot,
 		success: success,
 		slotIndex: payload.Val.Number,
 	})
