@@ -1,4 +1,4 @@
-package tests
+package unit
 
 import (
 	"bytes"
@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	paxocache "paxocache/src"
+	"paxocache/tests"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestDecodeBodyDecodes(t *testing.T) {
-	obj := Dummy{
+	obj := tests.Dummy{
 		X: 99,
 	}
 
@@ -23,7 +24,7 @@ func TestDecodeBodyDecodes(t *testing.T) {
 		Body: io.NopCloser(bytes.NewReader(body)),
 	}
 
-	ctx := paxocache.RequestContext[Dummy, Dummy]{
+	ctx := paxocache.RequestContext[tests.Dummy, tests.Dummy]{
 		Req: &req,
 	}
 
@@ -35,7 +36,7 @@ func TestDecodeBodyDecodes(t *testing.T) {
 
 func TestListenerSetsPortWhenNotProvided(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 	}
 
 	assert.Equal(t, uint64(0), listener.Port)
@@ -48,7 +49,7 @@ func TestListenerSetsPortWhenNotProvided(t *testing.T) {
 
 func TestListenerDoesNotOverridePortWhenProvided(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Port: 8000,
 	}
 
@@ -60,7 +61,7 @@ func TestListenerDoesNotOverridePortWhenProvided(t *testing.T) {
 
 func TestListenerStartListeningSuccessfully(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 	}
 
 	err := listener.Listen()
@@ -70,7 +71,7 @@ func TestListenerStartListeningSuccessfully(t *testing.T) {
 
 func TestListenerRejectsMissingToken(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Token: "abc",
 	}
 
@@ -88,7 +89,7 @@ func TestListenerRejectsMissingToken(t *testing.T) {
 
 func TestListenerRejectsWrongToken(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Token: "abc",
 	}
 
@@ -107,7 +108,7 @@ func TestListenerRejectsWrongToken(t *testing.T) {
 
 func TestListenerAcceptsCorrectToken(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Token: "abc",
 	}
 

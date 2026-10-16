@@ -1,7 +1,8 @@
-package tests
+package unit
 
 import (
 	paxocache "paxocache/src"
+	"paxocache/tests"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,10 +14,10 @@ import (
 
 func TestRegisterListenerPullsAddressFromListener(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 	}
 
-	discovery := paxocache.NewServerDiscoveryService(SilentLogger())
+	discovery := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 
 	listener.Listen()
 	discovery.RegisterListener(&listener)
@@ -33,11 +34,11 @@ func TestRegisterListenerPullsAddressFromListener(t *testing.T) {
 
 func TestRegisterListenerExchangePullsTokenFromListener(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Token: "abc",
 	}
 
-	discovery := paxocache.NewServerDiscoveryService(SilentLogger())
+	discovery := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 
 	listener.Listen()
 	discovery.RegisterListener(&listener)
@@ -49,8 +50,8 @@ func TestExchangeWithUnionsResponseHosts(t *testing.T) {
 	otherHosts := []string{"ABC", "DEF"}
 	url := "http://127.0.0.1"
 
-	client := MockHttpClient{
-		get: func(actualUrl string, path string, payload any, result any) (int, error) {
+	client := tests.MockHttpClient{
+		MockGet: func(actualUrl string, path string, payload any, result any) (int, error) {
 			assert.Equal(t, url, actualUrl)
 			assert.Equal(t, paxocache.EXCHANGE_PATH, path)
 
@@ -61,7 +62,7 @@ func TestExchangeWithUnionsResponseHosts(t *testing.T) {
 
 	discovery := paxocache.ServerDiscoveryService{
 		KnownHosts: mapset.NewSet("HIJ"),
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Client: &client,
 	}
 
@@ -73,18 +74,18 @@ func TestExchangeWithUnionsResponseHosts(t *testing.T) {
 
 func TestExchangeUnionsKnownHosts(t *testing.T) {
 	listener := paxocache.Listener{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Token: "",
 	}
 
 	err := listener.Listen()
 	assert.Nil(t, err)
 
-	discoveryA := paxocache.NewServerDiscoveryService(SilentLogger())
+	discoveryA := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discoveryA.RegisterListener(&listener)
 	discoveryA.KnownHosts.Add("ABC")
 
-	discoveryB := paxocache.NewServerDiscoveryService(SilentLogger())
+	discoveryB := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discoveryB.Token = ""
 	discoveryB.KnownHosts.Add("DEF")
 
@@ -95,7 +96,7 @@ func TestExchangeUnionsKnownHosts(t *testing.T) {
 }
 
 func TestExchangeContactsNewHosts(t *testing.T) {
-	logger := SilentLogger()
+	logger := tests.SilentLogger()
 
 	listenerA := paxocache.Listener{
 		Logger: logger,

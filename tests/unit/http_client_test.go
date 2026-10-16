@@ -1,4 +1,4 @@
-package tests
+package unit
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	paxocache "paxocache/src"
+	"paxocache/tests"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,17 +41,17 @@ func getClientWithResponse(code int, payload any) *paxocache.HttpClient {
 	}
 
 	return &paxocache.HttpClient{
-		Logger: SilentLogger(),
+		Logger: tests.SilentLogger(),
 		Client: doer,
 	}
 }
 
 func TestReturnsPayload(t *testing.T) {
-	body := Dummy{
+	body := tests.Dummy{
 		X: 1,
 	}
 
-	var res Dummy
+	var res tests.Dummy
 	code, err := getClientWithResponse(200, body).Get("localhost", "", struct{}{}, &res)
 
 	assert.Nil(t, err)
@@ -61,7 +62,7 @@ func TestReturnsPayload(t *testing.T) {
 func TestReturnsError(t *testing.T) {
 	err := errors.New("Test error")
 
-	var res Dummy
+	var res tests.Dummy
 	code, resErr := getClientWithResponse(500, err).Get("localhost", "", struct{}{}, res)
 
 	assert.Equal(t, 500, code)

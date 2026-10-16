@@ -19,29 +19,29 @@ func SilentLogger() *slog.Logger {
 }
 
 type MockHttpClient struct {
-	get func(url string, path string, payload any, result any) (int, error)
-	post func(url string, path string, payload any, result any) (int, error)
-	patch func(url string, path string, payload any, result any) (int, error)
-	put func(url string, path string, payload any, result any) (int, error)
-	delete func(url string, path string, payload any, result any) (int, error)
+	MockGet func(url string, path string, payload any, result any) (int, error)
+	MockPost func(url string, path string, payload any, result any) (int, error)
+	MockPatch func(url string, path string, payload any, result any) (int, error)
+	MockPut func(url string, path string, payload any, result any) (int, error)
+	MockDelete func(url string, path string, payload any, result any) (int, error)
 }
 
 func (this *MockHttpClient) Get(url string, path string, payload any, result any) (int, error) {
-	return this.get(url, path, payload, result)
+	return this.MockGet(url, path, payload, result)
 }
 
 func (this *MockHttpClient) Post(url string, path string, payload any, result any) (int, error) {
-	return this.get(url, path, payload, result)
+	return this.MockGet(url, path, payload, result)
 }
 
 func (this *MockHttpClient) Patch(url string, path string, payload any, result any) (int, error) {
-	return this.get(url, path, payload, result)
+	return this.MockGet(url, path, payload, result)
 }
 
 func (this *MockHttpClient) Put(url string, path string, payload any, result any) (int, error) {
-	return this.get(url, path, payload, result)
+	return this.MockGet(url, path, payload, result)
 }
 
 func (this *MockHttpClient) Delete(url string, path string, payload any, result any) (int, error) {
-	return this.get(url, path, payload, result)
+	return this.MockGet(url, path, payload, result)
 }
