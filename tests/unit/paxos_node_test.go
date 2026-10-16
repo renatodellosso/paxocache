@@ -96,44 +96,6 @@ func TestGainLeadershipUpdatesState(t *testing.T) {
 	assert.Equal(t, 0, len(node.PhaseOneAcceptances))
 }
 
-func TestGainLeadershipConvertsPhaseOneAcceptances(t *testing.T) {
-	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
-	
-	ballot := paxocache.Ballot{
-		Number: 0,
-		OwnerId: node.Id,
-	}
-	node.LeaderBallot = &ballot
-
-	slotA := paxocache.Slot[any]{
-		Number: 0,
-		Ballot: ballot,
-		Val: 123,
-	}
-	node.PhaseOneAcceptances[slotA.Number] = slotA
-
-	slotB := paxocache.Slot[any]{
-		Number: 1,
-		Ballot: ballot,
-		Val: 456,
-	}
-	node.PhaseOneAcceptances[slotB.Number] = slotB
-
-	client.On("RequestAcceptance", slotA)
-	client.On("RequestAcceptance", slotB)
-
-	node.GainLeadership()
-
-	client.AssertExpectations(t)
-
-	assert.Equal(t, 0, len(node.PhaseOneAcceptances))
-	assert.Equal(t, 2, len(node.PendingAcceptances))
-
-	assert.Equal(t, slotA, node.PendingAcceptances[slotA.Number].Proposal)
-	assert.Equal(t, slotB, node.PendingAcceptances[slotB.Number].Proposal)
-}
-
 func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
 	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
@@ -342,7 +304,11 @@ func TestReceivePromiseDoesNothingOnOlderBallot(t *testing.T) {
 func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	client := new(MockPaxosClient[any])
 	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
-	node.PoolSize = 99 // Ensure we don't wipe phase one acceptances by gaining leadership
+	node.HighestSlot = 99 // Don't gain leadership
+
+	node.Pools[1] = mapset.NewSet(node.Id, "other1", "other2")
+	node.Pools[2] = mapset.NewSet(node.Id, "other1", "other2")
+	node.Pools[3] = mapset.NewSet(node.Id, "other1", "other2")
 
 	ballot := paxocache.Ballot{
 		Number: 1,
@@ -351,17 +317,17 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	node.LeaderBallot = &ballot
 
 	slotA := paxocache.Slot[any]{
-		Number: 0,
+		Number: 1,
 		Ballot: ballot,
 		Val: 123,
 	}
 	slotB := paxocache.Slot[any]{
-		Number: 1,
+		Number: 2,
 		Ballot: paxocache.Ballot{},
 		Val: 456,
 	}
 	slotC := paxocache.Slot[any]{
-		Number: 2,
+		Number: 3,
 		Ballot: paxocache.Ballot{},
 		Val: 789,
 	}
@@ -370,7 +336,7 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	node.PhaseOneAcceptances[slotB.Number] = slotB
 
 	node.ReceivePromise(node.Id, ballot, true, []paxocache.Slot[any]{slotB, slotC, {
-		Number: 0,
+		Number: 1,
 		Ballot: paxocache.Ballot{},
 		Val: -123,
 	}})
@@ -384,10 +350,12 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 func TestReceiveAcceptAddsToAcceptedBy(t *testing.T) {
 	client := new(MockPaxosClient[any])
 	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
-	node.PoolSize = 99 // Ensure we don't commit
+	node.HighestSlot = 99 // Don't gain leadership
+
+	node.Pools[1] = mapset.NewSet(node.Id, "other")
 
 	slot := paxocache.Slot[any]{
-		Number: 0,
+		Number: 1,
 		Ballot: paxocache.Ballot{},
 		Val: 123,
 	}
@@ -401,10 +369,35 @@ func TestReceiveAcceptAddsToAcceptedBy(t *testing.T) {
 	assert.ElementsMatch(t, []string{node.Id}, node.PendingAcceptances[slot.Number].AcceptedBy.ToSlice())
 }
 
+func TestReceiveAcceptCommitsOnceQuorumIsReached(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
+	node.HighestSlot = 99 // Don't gain leadership
+
+	node.Pools[1] = mapset.NewSet(node.Id)
+
+	slot := paxocache.Slot[any]{
+		Number: 1,
+		Ballot: paxocache.Ballot{},
+		Val: 123,
+	}
+
+	client.On("Commit", slot)
+
+	node.PendingAcceptances[slot.Number] = paxocache.PendingSlot[any]{
+		Proposal: slot,
+		AcceptedBy: mapset.NewSet[string](),
+	}
+
+	node.ReceiveAccept(node.Id, slot.Ballot, true, slot.Number)
+
+	client.AssertExpectations(t)
+}
+
 func TestReceiveAcceptCommitsIfQuorumHasAccepted(t *testing.T) {
 	client := new(MockPaxosClient[any])
 	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger())
-	node.PoolSize = 1 // Ensure we don't commit
+	node.HighestSlot = 99 // Don't gain leadership
 
 	slot := paxocache.Slot[any]{
 		Number: 0,
