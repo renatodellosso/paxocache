@@ -16,6 +16,8 @@ type HttpPaxosClient[T any] struct {
 	logger *slog.Logger
 
 	node *PaxosNode[T]
+	// Defaults to "" (no prefix)
+	prefix string
 
 	getRecipients func() []string
 }
@@ -50,7 +52,7 @@ func (this *HttpPaxosClient[T]) withFrom(payload any) WithFrom[any] {
 func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
 	send := func(host string) {
 		var res PromisePayload[T]
-		this.client.Post(host, PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
+		this.client.Post(host, this.prefix + PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
 
 		this.node.ReceivePromise(res.from, res.ballot, res.success, res.acceptances)
 	}
@@ -61,7 +63,7 @@ func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
 func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
 	send := func(host string) {
 		var res AcceptPayload[T]
-		this.client.Post(host, PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
+		this.client.Post(host, this.prefix + PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 
 		this.node.ReceiveAccept(res.from, res.ballot, res.success, res.slotIndex)
 	}
@@ -72,7 +74,7 @@ func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
 func (this *HttpPaxosClient[T]) Commit(slot Slot[T]) {
 	send := func(host string) {
 		var res any
-		this.client.Post(host, PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
+		this.client.Post(host, this.prefix + PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 	}
 	
 	this.forEachRecipient(send)

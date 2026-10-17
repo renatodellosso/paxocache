@@ -12,6 +12,8 @@ type PaxosServer[T any] struct {
 	logger *slog.Logger
 
 	nodes map[string]*PaxosNode[T]
+	// Defaults to "" (no prefix)
+	prefix string
 }
 
 func (this *PaxosServer[T]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], PromisePayload[T]]) {
@@ -88,10 +90,23 @@ func (this *PaxosServer[T]) HandleCommit(ctx RequestContext[WithFrom[Slot[T]], a
 	ctx.Respond(http.StatusOK, nil)
 }
 
+func (this *PaxosServer[T]) HandlePull(ctx RequestContext[any, PaxosCoreData[T]]) {
+	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+
+	if !ok {
+		this.logger.Error(PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
+		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+		return
+	}
+
+	ctx.Respond(http.StatusOK, node.getCoreData())
+}
+
 func (this *PaxosServer[T]) RegisterListener(listener *Listener) {
 	this.logger.Debug("Registering paxos server with listener...")
 
-	listener.RegisterRoute(http.MethodPost, PAXOS_PREPARE_ROUTE + "/{partition}", this.HandlePrepare)
-	listener.RegisterRoute(http.MethodPost, PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/{partition}", this.HandleRequestAcceptance)
-	listener.RegisterRoute(http.MethodPost, PAXOS_COMMIT_ROUTE + "/{partition}", this.HandleCommit)
+	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_PREPARE_ROUTE + "/{partition}", this.HandlePrepare)
+	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/{partition}", this.HandleRequestAcceptance)
+	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_COMMIT_ROUTE + "/{partition}", this.HandleCommit)
+	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_PULL_ROUTE + "/{partition}", this.HandlePull)
 }

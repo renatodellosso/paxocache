@@ -12,7 +12,8 @@ import (
 
 const PAXOS_PREPARE_ROUTE = "/cache/prepare"
 const PAXOS_REQUEST_ACCEPTANCE_ROUTE = "/cache/request-acceptance"
-const PAXOS_COMMIT_ROUTE = "/paxos/commit"
+const PAXOS_COMMIT_ROUTE = "/cache/commit"
+const PAXOS_PULL_ROUTE = "/cache/pull"
 
 // Allow 5 slots before pool changes take effect
 const POOL_DELAY = 5
@@ -93,21 +94,34 @@ func (this *ChosenSlot[T]) GetType() ChosenSlotType {
 	return ChosenSlotT
 }
 
+// Data needed to join the cluster
+type PaxosCoreData[T any] struct {
+	Partition string
+	Leader string
+
+	// Maps slot number to pool
+	Pools map[uint64]mapset.Set[string]
+
+	// Highest ballot we've promised
+	PromisedBallot Ballot
+
+	// Highest slot index we've seen or promised
+	HighestSlot uint64
+
+	// Slots already chosen
+	Chosen map[uint64]ChosenSlot[T]
+}
+
 // Handles Multipaxos for one log
 type PaxosNode[T any] struct {
-	Id string
-	Partition string
+	PaxosCoreData[T]
 
+	Id string
 	mutex sync.Mutex
 
 	client PaxosClient[T]
 	logger *slog.Logger
 
-	// Maps slot number to pool
-	Pools map[uint64]mapset.Set[string]
-
-	// Have we successfully obtained a quorum for its ballot and is not aware of being superseded yet?
-	IsLeader bool
 	// Ballot we're using to claim leadership
 	LeaderBallot *Ballot
 	// Our pool for determining current leadership
@@ -118,18 +132,10 @@ type PaxosNode[T any] struct {
 	PhaseOneAcceptances map[uint64]Slot[T]
 	RecoveredSlots mapset.Set[uint64]
 
-	// Highest ballot we've promised
-	PromisedBallot Ballot
-
-	// Highest slot index we've seen or promised
-	HighestSlot uint64
-
 	// What we've accepted, maps slot index -> highest balloted value
 	Acceptances map[uint64]Slot[T]
 	// Acceptances currently pending
 	PendingAcceptances map[uint64]PendingSlot[T]
-	// Slots already chosen
-	Chosen map[uint64]ChosenSlot[T]
 }
 
 func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], logger *slog.Logger, startingPool mapset.Set[string]) *PaxosNode[T] {
@@ -164,6 +170,22 @@ func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], log
 	}
 
 	return &node
+}
+
+func (this *PaxosNode[T]) getCoreData() PaxosCoreData[T] {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+	
+	// Copy everything in the core data struct
+	data := this.PaxosCoreData
+	data.Chosen = maps.Clone(data.Chosen)
+
+	data.Pools = make(map[uint64]mapset.Set[string])
+	for slot, pool := range this.Pools {
+		data.Pools[slot] = pool.Clone()
+	}
+
+	return data
 }
 
 // Lock beforehand
@@ -244,7 +266,6 @@ func (this *PaxosNode[T]) TryTakeLeadership() {
 		nextBallot = this.LeaderBallot.Number + 1
 	}
 
-	this.IsLeader = false
 	this.LeaderBallot = &Ballot{
 		Number: nextBallot,
 		OwnerId: this.Id,
@@ -265,12 +286,16 @@ func (this *PaxosNode[T]) TryTakeLeadership() {
 
 // Lock before calling
 func (this *PaxosNode[T]) gainLeadership() {
-	this.IsLeader = true
+	this.Leader = this.Id
+}
+
+func (this *PaxosNode[T]) IsLeader() bool {
+	return this.Leader == this.Id
 }
 
 // Returns whether we lost leadership. Lock beforehand
 func (this *PaxosNode[T]) promiseBallot(ballot Ballot) bool {
-	this.logger.Debug("promiseBallot", "id", this.Id, "IsLeader", this.IsLeader, "ballot", ballot, "previous", this.PromisedBallot)
+	this.logger.Debug("promiseBallot", "id", this.Id, "IsLeader", this.IsLeader(), "ballot", ballot, "previous", this.PromisedBallot)
 
 	if this.PromisedBallot.GreaterThan(ballot) {
 		return false // Never promise a lower ballot
@@ -278,7 +303,6 @@ func (this *PaxosNode[T]) promiseBallot(ballot Ballot) bool {
 
 	this.PromisedBallot = ballot
 	if this.LeaderBallot != nil && this.PromisedBallot.GreaterThan(*this.LeaderBallot) {
-		this.IsLeader = false
 		return true
 	}
 
@@ -304,6 +328,8 @@ func (this *PaxosNode[T]) ReceivePrepare(from string, ballot Ballot) (bool, map[
 func (this *PaxosNode[T]) ReceiveRequestAcceptance(from string, slot Slot[T]) (bool, Ballot) {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
+
+	this.Leader = from
 
 	if this.PromisedBallot.GreaterThan(slot.Ballot) {
 		this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "from", from, "ballot", slot.Ballot, "slot", slot, "success", false, "reason", "Promised higher ballot")
@@ -409,6 +435,8 @@ func (this *PaxosNode[T]) ReceiveCommit(from string, slot Slot[T]) {
 	defer this.mutex.Unlock()
 
 	this.logger.Debug("ReceiveCommit", "id", this.Id, "from", from, "slot", slot)
+
+	this.Leader = from
 
 	delete(this.PendingAcceptances, slot.Number)
 	this.Chosen[slot.Number] = ChosenSlot[T]{

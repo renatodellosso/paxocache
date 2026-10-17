@@ -36,7 +36,7 @@ func TestNewPaxosNodeSetsValues(t *testing.T) {
 
 	assert.Equal(t, id, node.Id)
 
-	assert.False(t, node.IsLeader)
+	assert.False(t, node.IsLeader())
 	assert.Equal(t, uint64(paxocache.POOL_DELAY), node.HighestSlot)
 
 	assert.Nil(t, node.LeaderBallot)
