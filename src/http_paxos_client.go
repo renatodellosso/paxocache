@@ -11,11 +11,11 @@ type WithFrom[T any] struct {
 	Val T
 }
 
-type HttpPaxosClient[T any] struct {
+type HttpPaxosClient[TOp any, TRes any] struct {
 	client IHttpClient
 	logger *slog.Logger
 
-	node *PaxosNode[T]
+	node *PaxosNode[TOp, TRes]
 	// Defaults to "" (no prefix)
 	prefix string
 
@@ -36,22 +36,22 @@ type AcceptPayload[T any] struct {
 	slotIndex uint64
 }
 
-func (this *HttpPaxosClient[T]) forEachRecipient(f func(string)) {
+func (this *HttpPaxosClient[TOp, TRes]) forEachRecipient(f func(string)) {
 	for _, host := range this.getRecipients() {
 		go f(host)
 	}
 }
 
-func (this *HttpPaxosClient[T]) withFrom(payload any) WithFrom[any] {
+func (this *HttpPaxosClient[TOp, TRes]) withFrom(payload any) WithFrom[any] {
 	return WithFrom[any] {
 		Val: payload,
 		From: this.node.Id,
 	}
 }
 
-func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
+func (this *HttpPaxosClient[TOp, TRes]) Prepare(ballot Ballot) {
 	send := func(host string) {
-		var res PromisePayload[T]
+		var res PromisePayload[TOp]
 		this.client.Post(host, this.prefix + PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
 
 		this.node.ReceivePromise(res.from, res.ballot, res.success, res.acceptances)
@@ -60,9 +60,9 @@ func (this *HttpPaxosClient[T]) Prepare(ballot Ballot) {
 	this.forEachRecipient(send)
 }
 
-func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
+func (this *HttpPaxosClient[TOp, TRes]) RequestAcceptance(slot Slot[TOp]) {
 	send := func(host string) {
-		var res AcceptPayload[T]
+		var res AcceptPayload[TOp]
 		this.client.Post(host, this.prefix + PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 
 		this.node.ReceiveAccept(res.from, res.ballot, res.success, res.slotIndex)
@@ -71,7 +71,7 @@ func (this *HttpPaxosClient[T]) RequestAcceptance(slot Slot[T]) {
 	this.forEachRecipient(send)
 }
 
-func (this *HttpPaxosClient[T]) Commit(slot Slot[T]) {
+func (this *HttpPaxosClient[TOp, TRes]) Commit(slot Slot[TOp]) {
 	send := func(host string) {
 		var res any
 		this.client.Post(host, this.prefix + PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)

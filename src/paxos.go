@@ -9,9 +9,9 @@ import (
 
 const ROOT_SERVER_PREFIX = "/root"
 
-type PaxosPartition[T any] struct {
-	node PaxosNode[T]
-	client PaxosClient[T]
+type PaxosPartition[TOp any, TRes any] struct {
+	node PaxosNode[TOp, TRes]
+	client PaxosClient[TOp]
 }
 
 type PartitionOperationType int
@@ -24,31 +24,31 @@ type PartitionOperation struct {
 	partition string
 }
 
-type Paxos[T any] struct {
-	partitions map[string]PaxosPartition[T]
+type Paxos[TOp any, TRes any] struct {
+	partitions map[string]PaxosPartition[TOp, TRes]
 	partitionMutex sync.RWMutex
 
-	rootNode *PaxosNode[PartitionOperation]
-	rootServer PaxosServer[PartitionOperation]
+	rootNode *PaxosNode[PartitionOperation, mapset.Set[string]]
+	rootServer PaxosServer[PartitionOperation, mapset.Set[string]]
 
-	server PaxosServer[T]
+	server PaxosServer[TOp, TRes]
 	discovery *ServerDiscoveryService
 	token string
 
 	logger *slog.Logger
 }
 
-func NewPaxos[T any](logger *slog.Logger, discovery *ServerDiscoveryService) *Paxos[T] {
-	paxos := Paxos[T]{
-		partitions: make(map[string]PaxosPartition[T]),
-		rootServer: PaxosServer[PartitionOperation]{
+func NewPaxos[TOp any, TRes any](logger *slog.Logger, discovery *ServerDiscoveryService) *Paxos[TOp, TRes] {
+	paxos := Paxos[TOp, TRes]{
+		partitions: make(map[string]PaxosPartition[TOp, TRes]),
+		rootServer: PaxosServer[PartitionOperation, mapset.Set[string]]{
 			logger: logger,
-			nodes: make(map[string]*PaxosNode[PartitionOperation]),
+			nodes: make(map[string]*PaxosNode[PartitionOperation, mapset.Set[string]]),
 			prefix: ROOT_SERVER_PREFIX,
 		},
-		server: PaxosServer[T]{
+		server: PaxosServer[TOp, TRes]{
 			logger: logger,
-			nodes: make(map[string]*PaxosNode[T]),
+			nodes: make(map[string]*PaxosNode[TOp, TRes]),
 		},
 		discovery: discovery,
 		logger: logger,
@@ -57,7 +57,7 @@ func NewPaxos[T any](logger *slog.Logger, discovery *ServerDiscoveryService) *Pa
 	return &paxos
 }
 
-func (this *Paxos[T]) RegisterListener(listener *Listener) {
+func (this *Paxos[TOp, TRes]) RegisterListener(listener *Listener) {
 	this.logger.Debug("Registering paxos with listener...")
 
 	this.token = listener.Token
@@ -66,7 +66,7 @@ func (this *Paxos[T]) RegisterListener(listener *Listener) {
 }
 
 // Make this Paxos[T] ready to function
-func (this *Paxos[T]) Bootstrap() {
+func (this *Paxos[TOp, TRes]) Bootstrap() {
 	if this.discovery.KnownHosts.Difference(mapset.NewSet(this.discovery.address)).IsEmpty() {
 		this.BootstrapCluster()
 		return
@@ -76,8 +76,8 @@ func (this *Paxos[T]) Bootstrap() {
 }
 
 // Creates and sets rootNode
-func (this *Paxos[T]) createRootNode() {
-	rootClient := HttpPaxosClient[PartitionOperation]{
+func (this *Paxos[TOp, TRes]) createRootNode() {
+	rootClient := HttpPaxosClient[PartitionOperation, mapset.Set[string]]{
 		client: Http(this.token, this.logger),
 		logger: this.logger,
 		node: nil, // Make sure to set node later!
@@ -87,18 +87,18 @@ func (this *Paxos[T]) createRootNode() {
 		},
 	}
 
-	this.rootNode = NewPaxosNode(this.discovery.address, "", &rootClient, this.logger, mapset.NewSet(this.discovery.address))
+	this.rootNode = NewPaxosNode[PartitionOperation, mapset.Set[string]](this.discovery.address, "", &rootClient, this.logger, mapset.NewSet(this.discovery.address))
 	rootClient.node = this.rootNode
 
 	this.rootServer.nodes[this.rootNode.Id] = this.rootNode
 }
 
 // Call when we're the first server to start, e.g. we haven't discovered anyone else
-func (this *Paxos[T]) BootstrapCluster() {
+func (this *Paxos[TOp, TRes]) BootstrapCluster() {
 	this.createRootNode()
 }
 
 // Call if another server has already started
-func (this *Paxos[T]) BootstrapFromExisting() {
+func (this *Paxos[TOp, TRes]) BootstrapFromExisting() {
 
 }

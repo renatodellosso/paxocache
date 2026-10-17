@@ -8,15 +8,15 @@ import (
 	"slices"
 )
 
-type PaxosServer[T any] struct {
+type PaxosServer[TOp any, TRes any] struct {
 	logger *slog.Logger
 
-	nodes map[string]*PaxosNode[T]
+	nodes map[string]*PaxosNode[TOp, TRes]
 	// Defaults to "" (no prefix)
 	prefix string
 }
 
-func (this *PaxosServer[T]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], PromisePayload[T]]) {
+func (this *PaxosServer[TOp, TRes]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], PromisePayload[TOp]]) {
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
@@ -35,7 +35,7 @@ func (this *PaxosServer[T]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], P
 	ballot := payload.Val
 	success, acceptances, promisedBallot := node.ReceivePrepare(payload.From, ballot)
 
-	ctx.Respond(http.StatusOK, PromisePayload[T]{
+	ctx.Respond(http.StatusOK, PromisePayload[TOp]{
 		from: node.Id,
 		ballot: promisedBallot,
 		success: success,
@@ -43,7 +43,7 @@ func (this *PaxosServer[T]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], P
 	})
 }
 
-func (this *PaxosServer[T]) HandleRequestAcceptance(ctx RequestContext[WithFrom[Slot[T]], AcceptPayload[T]]) {
+func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[WithFrom[Slot[TOp]], AcceptPayload[TOp]]) {
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
@@ -61,7 +61,7 @@ func (this *PaxosServer[T]) HandleRequestAcceptance(ctx RequestContext[WithFrom[
 
 	success, promisedBallot := node.ReceiveRequestAcceptance(payload.From, payload.Val)
 
-	ctx.Respond(http.StatusOK, AcceptPayload[T]{
+	ctx.Respond(http.StatusOK, AcceptPayload[TOp]{
 		from: node.Id,
 		ballot: promisedBallot,
 		success: success,
@@ -69,7 +69,7 @@ func (this *PaxosServer[T]) HandleRequestAcceptance(ctx RequestContext[WithFrom[
 	})
 }
 
-func (this *PaxosServer[T]) HandleCommit(ctx RequestContext[WithFrom[Slot[T]], any]) {
+func (this *PaxosServer[TOp, TRes]) HandleCommit(ctx RequestContext[WithFrom[Slot[TOp]], any]) {
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
@@ -90,7 +90,7 @@ func (this *PaxosServer[T]) HandleCommit(ctx RequestContext[WithFrom[Slot[T]], a
 	ctx.Respond(http.StatusOK, nil)
 }
 
-func (this *PaxosServer[T]) HandlePull(ctx RequestContext[any, PaxosCoreData[T]]) {
+func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCoreData[TOp, TRes]]) {
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
@@ -102,7 +102,7 @@ func (this *PaxosServer[T]) HandlePull(ctx RequestContext[any, PaxosCoreData[T]]
 	ctx.Respond(http.StatusOK, node.getCoreData())
 }
 
-func (this *PaxosServer[T]) RegisterListener(listener *Listener) {
+func (this *PaxosServer[TOp, TRes]) RegisterListener(listener *Listener) {
 	this.logger.Debug("Registering paxos server with listener...")
 
 	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_PREPARE_ROUTE + "/{partition}", this.HandlePrepare)

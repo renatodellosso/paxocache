@@ -6,6 +6,6 @@ import (
 )
 
 func TestFulfillsPaxosClientInterface(t *testing.T) {
-	client := paxocache.HttpPaxosClient[any] {}
+	client := paxocache.HttpPaxosClient[any, any] {}
 	var _ paxocache.PaxosClient[any] = &client
 }
