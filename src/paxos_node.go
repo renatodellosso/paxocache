@@ -14,6 +14,21 @@ const PAXOS_PREPARE_ROUTE = "/cache/prepare"
 const PAXOS_REQUEST_ACCEPTANCE_ROUTE = "/cache/request-acceptance"
 const PAXOS_COMMIT_ROUTE = "/paxos/commit"
 
+// Allow 5 slots before pool changes take effect
+const POOL_DELAY = 5
+
+type PoolChange int
+
+const (
+	PoolChangeAdd = iota
+	PoolChangeRemove
+)
+
+type PoolChangeOp struct {
+	Op PoolChange
+	Id string
+}
+
 type PaxosClient[T any] interface {
 	Prepare(Ballot)
 	RequestAcceptance(Slot[T])
@@ -43,13 +58,11 @@ func (this Ballot) GreaterThan(other Ballot) bool {
 }
  
 type Slot[T any] struct {
-	// Slot index of this slot
-	Number uint64
+	ChosenSlot[T]
 	// Highest ballot this slot was accepted with
 	Ballot Ballot
-	Val T
 }
-
+ 
 type PendingSlot[T any] struct {
 	Proposal Slot[T]
 	AcceptedBy mapset.Set[string]
@@ -57,7 +70,27 @@ type PendingSlot[T any] struct {
 
 type ChosenSlot[T any] struct {
 	Number uint64
-	Val T
+	Val any
+}
+
+type ChosenSlotType int
+const (
+	ChosenSlotT = iota
+	ChosenSlotPoolChange
+	ChosenSlotNoOp
+)
+
+func (this *ChosenSlot[T]) GetType() ChosenSlotType {
+	switch this.Val.(type) {
+	case PoolChangeOp:
+		return ChosenSlotPoolChange
+	}
+
+	if this.Val == nil {
+		return ChosenSlotNoOp
+	}
+
+	return ChosenSlotT
 }
 
 // Handles Multipaxos for one log
@@ -107,6 +140,8 @@ func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], log
 		client: client,
 		logger: logger,
 
+		HighestSlot: POOL_DELAY,
+
 		Pools: make(map[uint64]mapset.Set[string]),
 
 		LeadershipVoters: mapset.NewSet[string](),
@@ -119,15 +154,22 @@ func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], log
 		Chosen: make(map[uint64]ChosenSlot[T]),
 	}
 
-	node.Pools[0] = mapset.NewSet(node.Id)
+	// Bootstrap our starting pools
+	for i := range uint64(POOL_DELAY) {
+		node.Pools[i] = mapset.NewSet(node.Id)
+		node.Chosen[i] = ChosenSlot[T]{
+			Number: i,
+			Val: nil,
+		}
+	}
 
 	return &node
 }
 
 // Lock beforehand
 func (this *PaxosNode[T]) quorumSize(slot uint64) int {
-	pool, ok := this.Pools[slot]
-	if !ok {
+	pool := this.GetPoolForSlot(slot)
+	if pool == nil {
 		return math.MaxInt
 	}
 
@@ -136,19 +178,63 @@ func (this *PaxosNode[T]) quorumSize(slot uint64) int {
 
 // Lock beforehand
 func (this *PaxosNode[T]) isInPool(slot uint64, id string) bool {
-	pool, ok := this.Pools[slot]
-	if !ok {
+	pool := this.GetPoolForSlot(slot)
+	if pool == nil {
 		return false
 	}
 
 	return pool.ContainsOne(id)
 }
 
+func applyPoolChange(prev mapset.Set[string], op PoolChangeOp) mapset.Set[string] {
+	changeSet := mapset.NewSet(op.Id)
+	if op.Op == PoolChangeAdd {
+		return prev.Union(changeSet)
+	}
+
+	return prev.Difference(changeSet)
+}
+
+// Lock beforehand. Returns nil if we can't determine the pool
+func (this *PaxosNode[T]) GetPoolForSlot(slot uint64) mapset.Set[string] {
+	if pool, ok := this.Pools[slot]; ok {
+		fmt.Println("Cached pool")
+		return pool
+	}
+
+	if slot < POOL_DELAY {
+		fmt.Println("slot < POOL_DELAY")
+		return nil
+	}
+
+	prevPool := this.GetPoolForSlot(slot - POOL_DELAY)
+	if prevPool == nil {
+		fmt.Println("prevPool is nil")
+		return nil
+	}
+	
+	prevSlot, ok := this.Chosen[slot - POOL_DELAY];
+	if !ok {
+		fmt.Println("prevSlot not found")
+		return nil
+	}
+
+	if prevSlot.GetType() != ChosenSlotPoolChange {
+		fmt.Println("No pool change. Type:", prevSlot.GetType())
+		this.Pools[slot] = prevPool
+		return prevPool
+	}
+
+	fmt.Println("Found pool change")
+	this.Pools[slot] = applyPoolChange(prevPool, prevSlot.Val.(PoolChangeOp))
+	return this.Pools[slot]
+}
+
 func (this *PaxosNode[T]) TryTakeLeadership() {
 	this.mutex.Lock()
 
-	if _, ok := this.Pools[this.HighestSlot]; !ok {
-		this.logger.Error("PaxosNode tried to take leadership, but had no pool!", this.Id, this.HighestSlot)
+	if pool := this.GetPoolForSlot(this.HighestSlot); pool == nil {
+		this.logger.Error("PaxosNode tried to take leadership, but could not determine pool!", this.Id, this.HighestSlot)
 		this.mutex.Unlock()
 		return
 	}
@@ -164,7 +250,7 @@ func (this *PaxosNode[T]) TryTakeLeadership() {
 		OwnerId: this.Id,
 	}
 
-	this.LeadershipVoters = this.Pools[this.HighestSlot]
+	this.LeadershipVoters = this.GetPoolForSlot(this.HighestSlot)
 	this.BallotPromisedBy = mapset.NewSet[string]()
 	this.PhaseOneAcceptances = make(map[uint64]Slot[T])
 	this.RecoveredSlots = mapset.NewSet[uint64]()
@@ -267,7 +353,7 @@ func (this *PaxosNode[T]) ReceivePromise(from string, ballot Ballot, success boo
 	// Convert phase 1 acceptances into pending acceptances
 	toRequest := []Slot[T]{}
 	for num, val := range this.PhaseOneAcceptances {
-		if pool, ok := this.Pools[num]; !ok || pool.Intersect(this.BallotPromisedBy).Cardinality() < this.quorumSize(num) {
+		if pool := this.GetPoolForSlot(num); pool == nil || pool.Intersect(this.BallotPromisedBy).Cardinality() < this.quorumSize(num) {
 			continue
 		}
 

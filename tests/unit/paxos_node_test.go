@@ -37,7 +37,7 @@ func TestNewPaxosNodeSetsValues(t *testing.T) {
 	assert.Equal(t, id, node.Id)
 
 	assert.False(t, node.IsLeader)
-	assert.Equal(t, uint64(0), node.HighestSlot)
+	assert.Equal(t, uint64(paxocache.POOL_DELAY), node.HighestSlot)
 
 	assert.Nil(t, node.LeaderBallot)
 	assert.Equal(t, paxocache.Ballot{
@@ -50,7 +50,54 @@ func TestNewPaxosNodeSetsValues(t *testing.T) {
 	assert.Equal(t, 0, len(node.PhaseOneAcceptances))
 	assert.Equal(t, 0, len(node.Acceptances))
 	assert.Equal(t, 0, len(node.PendingAcceptances))
-	assert.Equal(t, 0, len(node.Chosen))
+	assert.Equal(t, paxocache.POOL_DELAY, len(node.Chosen))
+}
+
+func TestGetPoolForSlotReturnsSelfForStarterPools(t *testing.T) {
+	var client paxocache.PaxosClient[any]
+	logger := tests.SilentLogger()
+	id := "id-123"
+
+	node := paxocache.NewPaxosNode(id, "", client, logger)
+
+	expected := []string{id}
+	for i := range uint64(paxocache.POOL_DELAY) {
+		res := node.GetPoolForSlot(i)
+		assert.NotNilf(t, res, "%s has no pool!", i)
+		assert.ElementsMatch(t, expected, res.ToSlice())
+	}
+}
+
+func TestGetPoolForSlotAppliesPoolChanges(t *testing.T) {
+	var client paxocache.PaxosClient[any]
+	logger := tests.SilentLogger()
+	id := "id-123"
+
+	node := paxocache.NewPaxosNode(id, "", client, logger)
+
+	// Set slots 0 and 1 so changes take effect for POOL_DELAY and POOL_DELAY + 1
+	node.Chosen[0] = paxocache.ChosenSlot[any]{
+		Number: 0,
+		Val: paxocache.PoolChangeOp{
+			Op: paxocache.PoolChangeAdd,
+			Id: "A",
+		},
+	}
+	node.Chosen[1] = paxocache.ChosenSlot[any]{
+		Number: 1,
+		Val: paxocache.PoolChangeOp{
+			Op: paxocache.PoolChangeRemove,
+			Id: "A",
+		},
+	}
+
+	res := node.GetPoolForSlot(paxocache.POOL_DELAY)
+	assert.NotNilf(t, res, "Res is nil!")
+	assert.ElementsMatch(t, []string{node.Id, "A"}, res.ToSlice())
+
+	res = node.GetPoolForSlot(paxocache.POOL_DELAY + 1)
+	assert.NotNilf(t, res, "Res is nil!")
+	assert.ElementsMatch(t, []string{node.Id}, res.ToSlice())
 }
 
 func TestTakeLeadershipSetsLeaderBallot(t *testing.T) {
