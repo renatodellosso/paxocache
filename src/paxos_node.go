@@ -132,7 +132,7 @@ type PaxosNode[T any] struct {
 	Chosen map[uint64]ChosenSlot[T]
 }
 
-func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], logger *slog.Logger) *PaxosNode[T] {
+func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], logger *slog.Logger, startingPool mapset.Set[string]) *PaxosNode[T] {
 	node := PaxosNode[T]{
 		Id: id,
 		Partition: partition,
@@ -156,7 +156,7 @@ func NewPaxosNode[T any](id string, partition string, client PaxosClient[T], log
 
 	// Bootstrap our starting pools
 	for i := range uint64(POOL_DELAY) {
-		node.Pools[i] = mapset.NewSet(node.Id)
+		node.Pools[i] = startingPool
 		node.Chosen[i] = ChosenSlot[T]{
 			Number: i,
 			Val: nil,
