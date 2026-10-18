@@ -1,11 +1,13 @@
 package paxocache
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"math"
 	"sync"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v3"
 )
@@ -14,9 +16,12 @@ const PAXOS_PREPARE_ROUTE = "/cache/prepare"
 const PAXOS_REQUEST_ACCEPTANCE_ROUTE = "/cache/request-acceptance"
 const PAXOS_COMMIT_ROUTE = "/cache/commit"
 const PAXOS_PULL_ROUTE = "/cache/pull"
+const PAXOS_JOIN_ROUTE = "/cache/join"
 
 // Allow 5 slots before pool changes take effect
 const POOL_DELAY = 5
+
+const TIMEOUT = 60 * time.Second
 
 type PoolChange int
 
@@ -34,6 +39,8 @@ type PaxosClient[T any] interface {
 	Prepare(Ballot)
 	RequestAcceptance(Slot[T])
 	Commit(Slot[T])
+	// Attempt to be added to the pool
+	Join(from string) error
 }
 
 // Should be comparable by default
@@ -95,7 +102,7 @@ func (this *ChosenSlot[TOp]) GetType() ChosenSlotType {
 }
 
 // Data needed to join the cluster
-type PaxosCoreData[TOp any, TRes any] struct {
+type PaxosCoreData[TOp comparable, TRes any] struct {
 	Partition string
 	Leader string
 
@@ -113,7 +120,7 @@ type PaxosCoreData[TOp any, TRes any] struct {
 }
 
 // Handles Multipaxos for one log
-type PaxosNode[TOp any, TRes any] struct {
+type PaxosNode[TOp comparable, TRes any] struct {
 	PaxosCoreData[TOp, TRes]
 
 	Id string
@@ -137,10 +144,10 @@ type PaxosNode[TOp any, TRes any] struct {
 	// Acceptances currently pending
 	PendingAcceptances map[uint64]PendingSlot[TOp]
 
-	// ProcessOperation func(op *T, prev) {}
+	ProcessOperation func(op TOp, prev TRes) TRes
 }
 
-func NewPaxosNode[TOp any, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
+func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
 	node := PaxosNode[TOp, TRes]{
 		Id: id,
 		Partition: partition,
@@ -220,7 +227,7 @@ func applyPoolChange(prev mapset.Set[string], op PoolChangeOp) mapset.Set[string
 }
 
 // Lock beforehand. Returns nil if we can't determine the pool
-func (this *PaxosNode[TOp, TRes]) GetPoolForSlot(slot uint64) mapset.Set[string] {
+func (this *PaxosCoreData[TOp, TRes]) GetPoolForSlot(slot uint64) mapset.Set[string] {
 	if pool, ok := this.Pools[slot]; ok {
 		fmt.Println("Cached pool")
 		return pool
@@ -343,6 +350,10 @@ func (this *PaxosNode[TOp, TRes]) ReceiveRequestAcceptance(from string, slot Slo
 		return false, this.PromisedBallot
 	}
 
+	if slot.Number > this.HighestSlot {
+		this.HighestSlot = slot.Number
+	}
+
 	this.Acceptances[slot.Number] = slot
 	// Never accept anything below this ballot now
 	this.promiseBallot(slot.Ballot)
@@ -440,9 +451,93 @@ func (this *PaxosNode[TOp, TRes]) ReceiveCommit(from string, slot Slot[TOp]) {
 
 	this.Leader = from
 
+
+	if slot.Number > this.HighestSlot {
+		this.HighestSlot = slot.Number
+	}
+
 	delete(this.PendingAcceptances, slot.Number)
 	this.Chosen[slot.Number] = ChosenSlot[TOp]{
 		Number: slot.Number,
 		Val: slot.Val,
 	}
+}
+
+// Blocks until value is committed. Also see ProposePoolChange and ProposeNoOp
+func (this *PaxosNode[TOp, TRes]) Propose(val TOp) (uint64, error) {
+	return this.proposeWithTimeout(val, TIMEOUT)
+}
+
+// Blocks until value is committed.
+func (this *PaxosNode[TOp, TRes]) ProposePoolChange(op PoolChange, id string) (uint64, error) {
+	return this.proposeWithTimeout(PoolChangeOp{
+		Op: op,
+		Id: id,
+	}, TIMEOUT)
+}
+
+func (this *PaxosNode[TOp, TRes]) ProposeNoOp() (uint64, error) {
+	return this.proposeWithTimeout(nil, TIMEOUT)
+}
+
+// Returns (selected slot, error)
+func (this *PaxosNode[TOp, TRes]) proposeWithTimeout(val any, timeout time.Duration) (uint64, error) {
+	slotNumber := this.HighestSlot + 1
+
+	this.logger.Debug("Proposing...", "slot", slotNumber, "val", val, "timeout", timeout)
+	
+	go this.client.RequestAcceptance(Slot[TOp]{
+		Number: slotNumber,
+		Ballot: *this.LeaderBallot,
+		Val: val,
+	})
+
+	// Wait for something to be committed in that slot
+	wait := time.Millisecond * 50
+	for timeout > 0 {
+		time.Sleep(wait)
+
+		timeout -= wait
+		wait *= 2
+
+		if _, ok := this.Chosen[slotNumber]; ok {
+			break
+		}
+	}
+
+	chosen, ok := this.Chosen[slotNumber]
+
+	if !ok {
+		return 0, errors.New("Ran out of time")
+	}
+
+	if chosen.Val != val {
+		// Something else was chosen try again if we have time left
+		if timeout < 0 {
+			return 0, errors.New("Something else was chosen and no time was left to retry")
+		}
+
+		return this.proposeWithTimeout(val, timeout)
+	}
+
+	// Success!
+	return slotNumber, nil
+}
+
+func (this *PaxosNode[TOp, TRes]) GetState() TRes {
+	var res TRes
+
+	expectedSlot := uint64(0)
+	for slot, val := range this.Chosen {
+		if slot > expectedSlot {
+			break
+		}
+		expectedSlot++
+
+		if val.GetType() == ChosenSlotT {
+			res = this.ProcessOperation(val.Val.(TOp), res)
+		}
+	}
+
+	return res
 }

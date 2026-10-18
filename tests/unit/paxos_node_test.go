@@ -27,6 +27,11 @@ func (this *MockPaxosClient[T]) Commit(slot paxocache.Slot[T]) {
 	this.Called(slot)
 }
 
+func (this *MockPaxosClient[T]) Join(from string) error {
+	this.Called(from)
+	return nil
+}
+
 func TestNewPaxosNodeSetsValues(t *testing.T) {
 	var client paxocache.PaxosClient[any]
 	logger := tests.SilentLogger()
