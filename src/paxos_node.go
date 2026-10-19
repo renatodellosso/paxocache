@@ -17,6 +17,7 @@ const PAXOS_REQUEST_ACCEPTANCE_ROUTE = "/cache/request-acceptance"
 const PAXOS_COMMIT_ROUTE = "/cache/commit"
 const PAXOS_PULL_ROUTE = "/cache/pull"
 const PAXOS_JOIN_ROUTE = "/cache/join"
+const PAXOS_PROPOSE_ROUTE = "/cache/propose"
 
 // Allow 5 slots before pool changes take effect
 const POOL_DELAY = 5
@@ -41,6 +42,7 @@ type PaxosClient[T any] interface {
 	Commit(Slot[T])
 	// Attempt to be added to the pool
 	Join(from string) error
+	Propose(val T) error
 }
 
 // Should be comparable by default

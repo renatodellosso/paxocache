@@ -113,7 +113,7 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 
 	payload, err := ctx.DecodeBody()
 	if err != nil {
-		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": error decoding body", "error", err)
+		this.logger.Error(PAXOS_JOIN_ROUTE + "/" + ctx.Req.PathValue("partition") + ": error decoding body", "error", err)
 		ctx.RespondWithError(http.StatusInternalServerError,  err)
 		return
 	}
@@ -149,6 +149,43 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 	ctx.Respond(http.StatusOK, nil)
 }
 
+func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) {
+	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+
+	if !ok {
+		this.logger.Error(PAXOS_PROPOSE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
+		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+		return
+	}
+
+	payload, err := ctx.DecodeBody()
+	if err != nil {
+		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": error decoding body", "error", err)
+		ctx.RespondWithError(http.StatusInternalServerError,  err)
+		return
+	}
+	
+	if node.Leader != node.Id {
+		// Not the leader, forward request
+		err := node.client.Propose(payload)
+
+		if err != nil {
+			ctx.RespondWithError(http.StatusInternalServerError, err)
+			return
+		}
+	}
+
+	// Node is leader, propose change
+	_, err = node.Propose(payload)
+
+	if err != nil {
+		ctx.RespondWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	ctx.Respond(http.StatusOK, nil)
+}
+
 func (this *PaxosServer[TOp, TRes]) RegisterListener(listener *Listener) {
 	this.logger.Debug("Registering paxos server with listener...")
 
@@ -157,4 +194,5 @@ func (this *PaxosServer[TOp, TRes]) RegisterListener(listener *Listener) {
 	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_COMMIT_ROUTE + "/{partition}", this.HandleCommit)
 	listener.RegisterRoute(http.MethodGet, this.prefix + PAXOS_PULL_ROUTE + "/{partition}", this.HandlePull)
 	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_JOIN_ROUTE + "/{partition}", this.HandleJoin)
+	listener.RegisterRoute(http.MethodPost, this.prefix + PAXOS_PROPOSE_ROUTE + "/{partition}", this.HandlePropose)
 }

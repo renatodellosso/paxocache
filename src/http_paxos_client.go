@@ -98,3 +98,19 @@ func (this *HttpPaxosClient[TOp, TRes]) Join(from string) error {
 
 	return nil
 }
+
+func (this *HttpPaxosClient[TOp, TRes]) Propose(val TOp) error {
+	var res bool
+	_, err := this.client.Post(this.node.Leader, this.prefix + PAXOS_PROPOSE_ROUTE + "/" + this.node.Partition, val, &res)
+
+	if err != nil {
+		return err
+	}
+
+	if res != false {
+		return errors.New("Failed to propose") 
+	}
+
+	return nil
+
+}
