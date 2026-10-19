@@ -3,7 +3,9 @@ package unit
 import (
 	paxocache "paxocache/src"
 	"paxocache/tests"
+	"sync"
 	"testing"
+	"testing/synctest"
 
 	mapset "github.com/deckarep/golang-set/v3"
 	"github.com/stretchr/testify/assert"
@@ -479,4 +481,45 @@ func TestReceiveCommitAddsToChosen(t *testing.T) {
 		Number: slot.Number,
 		Val: slot.Val,
 	}, node.Chosen[slot.Number])
+}
+
+func TestProposeWithTimeoutRequestsAcceptance(t *testing.T) {
+	// Using synctest makes Time.sleep use fake time instead of real time
+	synctest.Test(t, func(t *testing.T) {
+		client := new(MockPaxosClient[any])
+		node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), mapset.NewSet("id"))
+
+		node.LeaderBallot = &paxocache.Ballot{
+			Number: 0,
+			OwnerId: node.Id,
+		}
+		node.Leader = node.Id
+
+		val := 1
+		slot := paxocache.Slot[any]{
+			Number: node.HighestSlot + 1,
+			Ballot: *node.LeaderBallot,
+			Val: val,
+		}
+
+		client.On("RequestAcceptance", slot).Run(func(args mock.Arguments) {
+			node.ReceiveCommit(node.Id, args.Get(0).(paxocache.Slot[any]))
+		})
+
+		var slotIndex uint64
+		var err error
+
+		var waitGroup sync.WaitGroup
+
+		waitGroup.Go(func() {
+			slotIndex, err = node.ProposeWithTimeout(val, paxocache.TIMEOUT)
+		})
+
+		waitGroup.Wait()
+
+		client.AssertExpectations(t)
+
+		assert.Nil(t, err)
+		assert.Equal(t, slot.Number, slotIndex)
+	})
 }

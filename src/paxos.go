@@ -85,7 +85,7 @@ func (this *Paxos[TOp, TRes]) RegisterListener(listener *Listener) {
 
 // Make this Paxos[T] ready to function
 func (this *Paxos[TOp, TRes]) Bootstrap() {
-	if this.discovery.KnownHosts.Difference(mapset.NewSet(this.discovery.address)).IsEmpty() {
+	if this.discovery.GetKnownHosts().Difference(mapset.NewSet(this.discovery.address)).IsEmpty() {
 		this.BootstrapCluster()
 		return
 	}

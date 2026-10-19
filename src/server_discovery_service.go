@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	mapset "github.com/deckarep/golang-set/v3"
 )
@@ -12,7 +13,8 @@ import (
 const EXCHANGE_PATH = "/cache/exchange"
 
 type ServerDiscoveryService struct {
-	KnownHosts mapset.Set[string]
+	mutex sync.RWMutex
+	knownHosts mapset.Set[string]
 	Token      string
 	address string
 	Logger *slog.Logger
@@ -27,7 +29,7 @@ type ExchangePayload struct {
 
 func NewServerDiscoveryService(logger *slog.Logger) *ServerDiscoveryService {
 	return &ServerDiscoveryService{
-		KnownHosts: mapset.NewSet[string](),
+		knownHosts: mapset.NewSet[string](),
 		Logger: logger,
 		Client: Http("", logger),
 	}
@@ -42,7 +44,10 @@ func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 	}
 
 	this.address = listener.Listener.Addr().String()
-	this.KnownHosts.Add(listener.Listener.Addr().String())
+
+	this.mutex.Lock()
+	this.knownHosts.Add(listener.Listener.Addr().String())
+	this.mutex.Unlock()
 
 	listener.RegisterRoute(http.MethodPost, EXCHANGE_PATH, this.handleExchange)
 }
@@ -50,8 +55,12 @@ func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 func (this *ServerDiscoveryService) handleExchange(ctx RequestContext[ExchangePayload, ExchangePayload]) {
 	body, _ := ctx.DecodeBody()
 
+	this.mutex.RLock()
+	hosts := this.knownHosts.ToSlice()
+	this.mutex.RUnlock()
+
 	ctx.Respond(http.StatusOK, ExchangePayload{
-		this.KnownHosts.ToSlice(),
+		hosts,
 		this.address,
 	})
 
@@ -59,7 +68,11 @@ func (this *ServerDiscoveryService) handleExchange(ctx RequestContext[ExchangePa
 }
 
 func (this *ServerDiscoveryService) ExchangeWith(host string, contactNewHosts bool) error {
-	if this.KnownHosts.Cardinality() == 0 {
+	this.mutex.RLock()
+	hostsSize := this.knownHosts.Cardinality()
+	this.mutex.RUnlock()
+
+	if hostsSize == 0 {
 		return errors.New("Tried to exchange before registering a listener! This is not allowed.")
 	}
 
@@ -67,13 +80,17 @@ func (this *ServerDiscoveryService) ExchangeWith(host string, contactNewHosts bo
 		host = "http://" + host
 	}
  
+	this.mutex.RLock()
+	hosts := this.knownHosts.ToSlice()
+	this.mutex.RUnlock()
+
 	var res ExchangePayload
 	_, err := this.Client.Post(host, EXCHANGE_PATH, ExchangePayload{
-		this.KnownHosts.ToSlice(),
+		hosts,
 		this.address,
 	}, &res)
 
-	this.Logger.Info("Received KnownHosts", "hosts", res.KnownHosts)
+	this.Logger.Info("Received knownHosts", "hosts", res.KnownHosts)
 
 	this.learnNewHosts(res.KnownHosts, contactNewHosts, host)
 	
@@ -81,16 +98,36 @@ func (this *ServerDiscoveryService) ExchangeWith(host string, contactNewHosts bo
 }
 
 func (this *ServerDiscoveryService) learnNewHosts(toLearn []string, contactNewHosts bool, receivedFrom string) {
+	this.mutex.Lock()
+	
 	otherSet := mapset.NewSet(toLearn...)
 
-	newHosts := otherSet.Difference(this.KnownHosts)
+	oldHosts := this.knownHosts
+	newHosts := otherSet.Difference(oldHosts)
+
 	newHosts.Remove(receivedFrom) // Don't send a request back to the server we got this request from
 
-	this.KnownHosts = this.KnownHosts.Union(otherSet)
+	this.knownHosts = oldHosts.Union(otherSet)
+
+	this.mutex.Unlock()
 
 	if contactNewHosts {
 		for host := range newHosts.Iter() {
 			go this.ExchangeWith(host, contactNewHosts)
 		}
 	}
+}
+
+func (this *ServerDiscoveryService) GetKnownHosts() mapset.Set[string] {
+	this.mutex.RLock()
+	defer this.mutex.RUnlock()
+
+	return this.knownHosts.Clone()
+}
+
+func (this *ServerDiscoveryService) SetKnownHosts(hosts mapset.Set[string]) {
+	this.mutex.Lock()
+	defer this.mutex.Unlock()
+
+	this.knownHosts = hosts
 }

@@ -231,34 +231,28 @@ func applyPoolChange(prev mapset.Set[string], op PoolChangeOp) mapset.Set[string
 // Lock beforehand. Returns nil if we can't determine the pool
 func (this *PaxosCoreData[TOp, TRes]) GetPoolForSlot(slot uint64) mapset.Set[string] {
 	if pool, ok := this.Pools[slot]; ok {
-		fmt.Println("Cached pool")
 		return pool
 	}
 
 	if slot < POOL_DELAY {
-		fmt.Println("slot < POOL_DELAY")
 		return nil
 	}
 
 	prevPool := this.GetPoolForSlot(slot - POOL_DELAY)
 	if prevPool == nil {
-		fmt.Println("prevPool is nil")
 		return nil
 	}
 	
 	prevSlot, ok := this.Chosen[slot - POOL_DELAY];
 	if !ok {
-		fmt.Println("prevSlot not found")
 		return nil
 	}
 
 	if prevSlot.GetType() != ChosenSlotPoolChange {
-		fmt.Println("No pool change. Type:", prevSlot.GetType())
 		this.Pools[slot] = prevPool
 		return prevPool
 	}
 
-	fmt.Println("Found pool change")
 	this.Pools[slot] = applyPoolChange(prevPool, prevSlot.Val.(PoolChangeOp))
 	return this.Pools[slot]
 }
@@ -467,23 +461,23 @@ func (this *PaxosNode[TOp, TRes]) ReceiveCommit(from string, slot Slot[TOp]) {
 
 // Blocks until value is committed. Also see ProposePoolChange and ProposeNoOp
 func (this *PaxosNode[TOp, TRes]) Propose(val TOp) (uint64, error) {
-	return this.proposeWithTimeout(val, TIMEOUT)
+	return this.ProposeWithTimeout(val, TIMEOUT)
 }
 
 // Blocks until value is committed.
 func (this *PaxosNode[TOp, TRes]) ProposePoolChange(op PoolChange, id string) (uint64, error) {
-	return this.proposeWithTimeout(PoolChangeOp{
+	return this.ProposeWithTimeout(PoolChangeOp{
 		Op: op,
 		Id: id,
 	}, TIMEOUT)
 }
 
 func (this *PaxosNode[TOp, TRes]) ProposeNoOp() (uint64, error) {
-	return this.proposeWithTimeout(nil, TIMEOUT)
+	return this.ProposeWithTimeout(nil, TIMEOUT)
 }
 
 // Returns (selected slot, error)
-func (this *PaxosNode[TOp, TRes]) proposeWithTimeout(val any, timeout time.Duration) (uint64, error) {
+func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(val any, timeout time.Duration) (uint64, error) {
 	this.mutex.Lock()
 	
 	slotNumber := this.HighestSlot + 1
@@ -529,7 +523,7 @@ func (this *PaxosNode[TOp, TRes]) proposeWithTimeout(val any, timeout time.Durat
 			return 0, errors.New("Something else was chosen and no time was left to retry")
 		}
 
-		return this.proposeWithTimeout(val, timeout)
+		return this.ProposeWithTimeout(val, timeout)
 	}
 
 	// Success!

@@ -22,9 +22,9 @@ func TestRegisterListenerPullsAddressFromListener(t *testing.T) {
 	listener.Listen()
 	discovery.RegisterListener(&listener)
 
-	assert.Equal(t, 1, discovery.KnownHosts.Cardinality())
+	assert.Equal(t, 1, discovery.GetKnownHosts().Cardinality())
 
-	address:= discovery.KnownHosts.ToSlice()[0]
+	address:= discovery.GetKnownHosts().ToSlice()[0]
 	split := strings.Split(address, ":") // Might be in the form [::]:Port
 	port, err := strconv.ParseUint(split[len(split) - 1], 10, 0)
 	
@@ -60,19 +60,19 @@ func TestExchangeWithUnionsResponseHosts(t *testing.T) {
 		},
 	}
 
-	discovery := paxocache.ServerDiscoveryService{
-		KnownHosts: mapset.NewSet("HIJ"),
+	discovery :=  paxocache.ServerDiscoveryService{
 		Logger: tests.SilentLogger(),
 		Client: &client,
 	}
+	discovery.SetKnownHosts(mapset.NewSet("HIJ"))
 
 	err := discovery.ExchangeWith(url, false)
 
 	assert.Nil(t, err)
-	assert.ElementsMatch(t, append(otherHosts, "HIJ"), discovery.KnownHosts.ToSlice())
+	assert.ElementsMatch(t, append(otherHosts, "HIJ"), discovery.GetKnownHosts().ToSlice())
 }
 
-func TestExchangeUnionsKnownHosts(t *testing.T) {
+func TestExchangeUnionsGetKnownHosts(t *testing.T) {
 	listener := paxocache.Listener{
 		Logger: tests.SilentLogger(),
 		Token: "",
@@ -83,16 +83,16 @@ func TestExchangeUnionsKnownHosts(t *testing.T) {
 
 	discoveryA := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discoveryA.RegisterListener(&listener)
-	discoveryA.KnownHosts.Add("ABC")
+	discoveryA.GetKnownHosts().Add("ABC")
 
 	discoveryB := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discoveryB.Token = ""
-	discoveryB.KnownHosts.Add("DEF")
+	discoveryB.SetKnownHosts(mapset.NewSet("DEF"))
 
 	err = discoveryB.ExchangeWith(listener.Listener.Addr().String(), false)
 	assert.Nil(t, err)
 
-	assert.ElementsMatch(t, discoveryA.KnownHosts.ToSlice(), discoveryB.KnownHosts.ToSlice())
+	assert.ElementsMatch(t, discoveryA.GetKnownHosts().ToSlice(), discoveryB.GetKnownHosts().ToSlice())
 }
 
 func TestExchangeContactsNewHosts(t *testing.T) {
@@ -137,7 +137,7 @@ func TestExchangeContactsNewHosts(t *testing.T) {
 		listenerC.Listener.Addr().String(),
 	}
 
-	assert.ElementsMatch(t, idealSet, discoveryA.KnownHosts.ToSlice())
-	assert.ElementsMatch(t, idealSet, discoveryB.KnownHosts.ToSlice())
-	assert.ElementsMatch(t, idealSet, discoveryC.KnownHosts.ToSlice())
+	assert.ElementsMatch(t, idealSet, discoveryA.GetKnownHosts().ToSlice())
+	assert.ElementsMatch(t, idealSet, discoveryB.GetKnownHosts().ToSlice())
+	assert.ElementsMatch(t, idealSet, discoveryC.GetKnownHosts().ToSlice())
 }
