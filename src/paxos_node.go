@@ -484,13 +484,18 @@ func (this *PaxosNode[TOp, TRes]) ProposeNoOp() (uint64, error) {
 
 // Returns (selected slot, error)
 func (this *PaxosNode[TOp, TRes]) proposeWithTimeout(val any, timeout time.Duration) (uint64, error) {
+	this.mutex.Lock()
+	
 	slotNumber := this.HighestSlot + 1
 
 	this.logger.Debug("Proposing...", "slot", slotNumber, "val", val, "timeout", timeout)
 	
+	ballot := *this.LeaderBallot
+
+	this.mutex.Unlock() // Unlock while call runs
 	go this.client.RequestAcceptance(Slot[TOp]{
 		Number: slotNumber,
-		Ballot: *this.LeaderBallot,
+		Ballot: ballot,
 		Val: val,
 	})
 
@@ -502,12 +507,17 @@ func (this *PaxosNode[TOp, TRes]) proposeWithTimeout(val any, timeout time.Durat
 		timeout -= wait
 		wait *= 2
 
-		if _, ok := this.Chosen[slotNumber]; ok {
+		this.mutex.Lock()
+		_, ok := this.Chosen[slotNumber]
+		this.mutex.Unlock()
+		if ok {
 			break
 		}
 	}
 
+	this.mutex.Lock()
 	chosen, ok := this.Chosen[slotNumber]
+	this.mutex.Unlock()
 
 	if !ok {
 		return 0, errors.New("Ran out of time")
