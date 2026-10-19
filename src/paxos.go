@@ -8,6 +8,7 @@ import (
 )
 
 const ROOT_SERVER_PREFIX = "/root"
+const ROOT_PARTITION = "root"
 
 type PaxosPartition[TOp comparable, TRes any] struct {
 	node *PaxosNode[TOp, TRes]
@@ -20,8 +21,8 @@ const (
 )
 
 type PartitionOperation struct {
-	op PartitionOperationType
-	partition string
+	Op PartitionOperationType
+	Partition string
 }
 
 func processPartitionOperation(op PartitionOperation, prev mapset.Set[string]) mapset.Set[string] {
@@ -29,9 +30,9 @@ func processPartitionOperation(op PartitionOperation, prev mapset.Set[string]) m
 		prev = mapset.NewSet[string]()
 	}
 
-	switch (op.op) {
+	switch (op.Op) {
 	case PartitionCreate: {
-		prev.Add(op.partition)
+		prev.Add(op.Partition)
 		return prev
 	}
 	}
@@ -94,7 +95,7 @@ func (this *Paxos[TOp, TRes]) Bootstrap() {
 }
 
 // Creates and sets rootNode
-func (this *Paxos[TOp, TRes]) createRootNode() {
+func (this *Paxos[TOp, TRes]) createRootNode() error {
 	rootClient := HttpPaxosClient[PartitionOperation, mapset.Set[string]]{
 		client: Http(this.token, this.logger),
 		logger: this.logger,
@@ -107,27 +108,56 @@ func (this *Paxos[TOp, TRes]) createRootNode() {
 
 	this.rootNode = NewPaxosNode[PartitionOperation, mapset.Set[string]](this.discovery.address, "", &rootClient, this.logger, mapset.NewSet(this.discovery.address))
 	this.rootNode.ProcessOperation = processPartitionOperation
+	this.rootNode.Partition = ROOT_PARTITION
 
 	rootClient.node = this.rootNode
 
-	this.rootServer.nodes[this.rootNode.Id] = this.rootNode
+	this.rootServer.nodes[this.rootNode.Partition] = this.rootNode
+
+	return this.rootNode.TryTakeLeadership(TIMEOUT)
 }
 
 // Call when we're the first server to start, e.g. we haven't discovered anyone else
-func (this *Paxos[TOp, TRes]) BootstrapCluster() {
-	this.createRootNode()
-}
+func (this *Paxos[TOp, TRes]) BootstrapCluster() error {
+	this.logger.Info("Bootstrapping cluster...")
 
-// Pulls and creates one partition
-func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
-	var data PaxosCoreData[TOp, TRes]
-	_, err := this.client.Get(this.rootNode.Leader, ROOT_SERVER_PREFIX + PAXOS_PULL_ROUTE, nil, &data)
-
+	err := this.createRootNode()
 	if err != nil {
+		this.logger.Error("Couldn't bootstrap cluster.", "error", err)
 		return err
 	}
 
-	err = this.rootNode.client.Join(this.discovery.address)
+	this.logger.Info("Bootstrapped cluster!")
+	return nil
+}
+
+// Call if another server has already started
+func (this *Paxos[TOp, TRes]) BootstrapFromExisting() {
+
+}
+
+func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
+	this.logger.Debug("Bootstrapping partition for cluster", "partition", partition)
+
+	err := this.rootNode.client.Propose(PartitionOperation{
+		PartitionCreate,
+		partition,
+	})
+
+	if err != nil {
+		this.logger.Error("Couldn't bootstrap partition.", "error", err)
+		return err
+	}
+
+	this.logger.Info("Bootstrapped partition!")
+	return nil
+}
+
+// Pulls and locally creates one partition
+func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
+	var data PaxosCoreData[TOp, TRes]
+	_, err := this.client.Get(this.rootNode.Leader, ROOT_SERVER_PREFIX + PAXOS_PULL_ROUTE, nil, &data)
+
 	if err != nil {
 		return err
 	}
@@ -150,10 +180,14 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 	}
 	this.server.nodes[partition] = node
 
+	err = client.Join(node.Id)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
-// Call if another server has already started
-func (this *Paxos[TOp, TRes]) BootstrapFromExisting() {
-
+func (this *Paxos[TOp, TRes]) GetPartitions() mapset.Set[string] {
+	return this.rootNode.GetState()
 }

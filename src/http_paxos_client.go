@@ -23,18 +23,20 @@ type HttpPaxosClient[TOp comparable, TRes any] struct {
 	getRecipients func() []string
 }
 
-type PromisePayload[T any] struct {
-	from string
-	ballot Ballot
-	success bool
-	acceptances []Slot[T]
+// Export fields so JSON serializes them
+
+type PromisePayload[T comparable] struct {
+	From string
+	Ballot Ballot
+	Success bool
+	Acceptances []Slot[T]
 }
 
-type AcceptPayload[T any] struct {
-	from string
-	ballot Ballot
-	success bool
-	slotIndex uint64
+type AcceptPayload struct {
+	From string
+	Ballot Ballot
+	Success bool
+	SlotIndex uint64
 }
 
 func (this *HttpPaxosClient[TOp, TRes]) forEachRecipient(f func(string)) {
@@ -53,9 +55,11 @@ func (this *HttpPaxosClient[TOp, TRes]) withFrom(payload any) WithFrom[any] {
 func (this *HttpPaxosClient[TOp, TRes]) Prepare(ballot Ballot) {
 	send := func(host string) {
 		var res PromisePayload[TOp]
-		this.client.Post(host, this.prefix + PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
+		status, err := this.client.Post(host, this.prefix + PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
 
-		this.node.ReceivePromise(res.from, res.ballot, res.success, res.acceptances)
+		this.logger.Debug("Prepare result", "host", host, "status", status, "err", err, "res", res)
+
+		this.node.ReceivePromise(res.From, res.Ballot, res.Success, res.Acceptances)
 	}
 	
 	this.forEachRecipient(send)
@@ -63,10 +67,10 @@ func (this *HttpPaxosClient[TOp, TRes]) Prepare(ballot Ballot) {
 
 func (this *HttpPaxosClient[TOp, TRes]) RequestAcceptance(slot Slot[TOp]) {
 	send := func(host string) {
-		var res AcceptPayload[TOp]
+		var res AcceptPayload
 		this.client.Post(host, this.prefix + PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 
-		this.node.ReceiveAccept(res.from, res.ballot, res.success, res.slotIndex)
+		this.node.ReceiveAccept(res.From, res.Ballot, res.Success, res.SlotIndex)
 	}
 	
 	this.forEachRecipient(send)
@@ -112,5 +116,4 @@ func (this *HttpPaxosClient[TOp, TRes]) Propose(val TOp) error {
 	}
 
 	return nil
-
 }

@@ -3,9 +3,7 @@ package paxocache
 import (
 	"errors"
 	"log/slog"
-	"maps"
 	"net/http"
-	"slices"
 )
 
 type PaxosServer[TOp comparable, TRes any] struct {
@@ -36,14 +34,14 @@ func (this *PaxosServer[TOp, TRes]) HandlePrepare(ctx RequestContext[WithFrom[Ba
 	success, acceptances, promisedBallot := node.ReceivePrepare(payload.From, ballot)
 
 	ctx.Respond(http.StatusOK, PromisePayload[TOp]{
-		from: node.Id,
-		ballot: promisedBallot,
-		success: success,
-		acceptances: slices.Collect(maps.Values(acceptances)),
+		From: node.Id,
+		Ballot: promisedBallot,
+		Success: success,
+		Acceptances: acceptances,
 	})
 }
 
-func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[WithFrom[Slot[TOp]], AcceptPayload[TOp]]) {
+func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[WithFrom[Slot[TOp]], AcceptPayload]) {
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
@@ -61,11 +59,11 @@ func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[W
 
 	success, promisedBallot := node.ReceiveRequestAcceptance(payload.From, payload.Val)
 
-	ctx.Respond(http.StatusOK, AcceptPayload[TOp]{
-		from: node.Id,
-		ballot: promisedBallot,
-		success: success,
-		slotIndex: payload.Val.Number,
+	ctx.Respond(http.StatusOK, AcceptPayload{
+		From: node.Id,
+		Ballot: promisedBallot,
+		Success: success,
+		SlotIndex: payload.Val.Number,
 	})
 }
 
@@ -150,17 +148,19 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 }
 
 func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) {
+	this.logger.Debug(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"))
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
-		this.logger.Error(PAXOS_PROPOSE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
-		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+		err := errors.New("Invalid partition")
+		this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)
+		ctx.RespondWithError(http.StatusNotFound,  err)
 		return
 	}
 
 	payload, err := ctx.DecodeBody()
 	if err != nil {
-		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": error decoding body", "error", err)
+		this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)
 		ctx.RespondWithError(http.StatusInternalServerError,  err)
 		return
 	}
@@ -170,6 +170,7 @@ func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) 
 		err := node.client.Propose(payload)
 
 		if err != nil {
+			this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)
 			ctx.RespondWithError(http.StatusInternalServerError, err)
 			return
 		}
@@ -179,10 +180,13 @@ func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) 
 	_, err = node.Propose(payload)
 
 	if err != nil {
+		this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)
 		ctx.RespondWithError(http.StatusInternalServerError, err)
 		return
 	}
 
+
+	this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", true)
 	ctx.Respond(http.StatusOK, nil)
 }
 

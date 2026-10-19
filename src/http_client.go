@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -38,10 +39,20 @@ func Http(token string, logger *slog.Logger) *HttpClient {
 	}
 }
 
+func sanitizeUrl(url string) string {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		url = "http://" + url
+	}
+
+	return url
+}
+
 func (this *HttpClient) request(method string, url string, path string, payload any, result any) (int, error) {
 	if url == "" {
 		return http.StatusNotFound, errors.New("URL cannot be ''!")
 	}
+
+	url = sanitizeUrl(url)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel() // Release when done

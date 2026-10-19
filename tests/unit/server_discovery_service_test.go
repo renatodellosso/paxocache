@@ -83,7 +83,7 @@ func TestExchangeUnionsGetKnownHosts(t *testing.T) {
 
 	discoveryA := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discoveryA.RegisterListener(&listener)
-	discoveryA.GetKnownHosts().Add("ABC")
+	discoveryA.SetKnownHosts(mapset.NewSet("ABC"))
 
 	discoveryB := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discoveryB.Token = ""
