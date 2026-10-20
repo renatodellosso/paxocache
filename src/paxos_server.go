@@ -119,7 +119,11 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 		return
 	}
 	
-	if node.Leader != node.Id {
+	node.mutex.Lock()
+	leader := node.Leader
+	node.mutex.Unlock()
+
+	if leader != node.Id {
 		// Not the leader, forward request
 		err := node.client.Join(payload.From)
 
@@ -138,13 +142,22 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 	}
 	
 	// Propose NoOps to fill POOL_DELAY
-	for node.HighestSlot < slot + POOL_DELAY {
-		slot, err = node.ProposeNoOp()
+	node.mutex.Lock()
+	highestSlot := node.HighestSlot
+	node.mutex.Unlock()
+
+	for highestSlot < slot + POOL_DELAY {
+		_, err = node.ProposeNoOp()
 
 		if err != nil {
 			ctx.RespondWithError(http.StatusInternalServerError, err)
 			return
 		}
+
+
+		node.mutex.Lock()
+		highestSlot = node.HighestSlot
+		node.mutex.Unlock()
 	}
 
 	ctx.Respond(http.StatusOK, nil)

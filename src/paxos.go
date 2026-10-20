@@ -1,6 +1,7 @@
 package paxocache
 
 import (
+	"errors"
 	"log/slog"
 	"sync"
 
@@ -101,11 +102,17 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosCoreData[PartitionOperat
 		logger: this.logger,
 		node: nil, // Make sure to set node later!
 		prefix: this.rootServer.prefix,
-		getRecipients: func() []string {
+		getRecipients: func(slot uint64) []string {
 			this.rootNode.mutex.Lock()
 			defer this.rootNode.mutex.Unlock()
 
-			return this.rootNode.GetPoolForSlot(this.rootNode.HighestSlot).ToSlice()
+			return this.rootNode.GetPoolForSlot(slot).ToSlice()
+		},
+		getAllRecipients: func(slot uint64) []string {
+			this.rootNode.mutex.Lock()
+			defer this.rootNode.mutex.Unlock()
+
+			return this.rootNode.GetPoolForSlot(slot).Union(this.discovery.GetKnownHosts()).ToSlice()
 		},
 	}
 
@@ -122,7 +129,55 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosCoreData[PartitionOperat
 
 	this.rootServer.nodes[this.rootNode.Partition] = this.rootNode
 
-	return this.rootNode.TryTakeLeadership(TIMEOUT)
+	if data == nil {
+		return this.rootNode.TryTakeLeadership(TIMEOUT)
+	}
+
+	return nil
+}
+
+func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *PaxosCoreData[TOp, TRes]) (*HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
+	client := HttpPaxosClient[TOp, TRes]{
+		client: Http(this.token, this.logger),
+		logger: this.logger,
+		node: nil, // Make sure to set node later!
+		getRecipients: func(slot uint64) []string {
+			node := this.partitions[partition].node
+
+			node.mutex.Lock()
+			defer node.mutex.Unlock()
+
+			return node.GetPoolForSlot(slot).ToSlice()
+		},
+		getAllRecipients: func(slot uint64) []string {
+			node := this.partitions[partition].node
+
+			node.mutex.Lock()
+			defer node.mutex.Unlock()
+
+			return node.GetPoolForSlot(slot).Union(this.discovery.GetKnownHosts()).ToSlice()
+		},
+	}
+
+	var node *PaxosNode[TOp, TRes]
+	if data != nil {
+		node = NewPaxosNodeFromCoreData(this.discovery.Address, &client, this.logger, data)
+	} else {
+		node = NewPaxosNode[TOp, TRes](this.discovery.Address, partition, &client, this.logger, mapset.NewSet(this.discovery.Address))
+	}
+	
+	client.node = node
+
+	this.partitions[partition] = PaxosPartition[TOp, TRes]{
+		node, &client,
+	}
+	this.server.nodes[partition] = node
+
+	if data == nil {
+		node.TryTakeLeadership(TIMEOUT)
+	}
+
+	return &client, node
 }
 
 // Call when we're the first server to start, e.g. we haven't discovered anyone else
@@ -139,11 +194,15 @@ func (this *Paxos[TOp, TRes]) BootstrapCluster() error {
 	return nil
 }
 
-func (this *Paxos[TOp, TRes]) pullRootData(index int) (*PaxosCoreData[PartitionOperation, mapset.Set[string]], error) {
+func (this *Paxos[TOp, TRes]) pullRootData(hosts []string, index int) (*PaxosCoreData[PartitionOperation, mapset.Set[string]], error) {
 	// Never pull from ourselves!
-	host := this.discovery.GetKnownHosts().ToSlice()[index]
+	if index >= len(hosts) {
+		return nil, errors.New("All hosts failed")
+	}
+
+	host := hosts[index]
 	if host == this.discovery.Address {
-		return this.pullRootData(index + 1)
+		return this.pullRootData(hosts, index + 1)
 	}
 
 	var data PaxosCoreData[PartitionOperation, mapset.Set[string]]
@@ -151,7 +210,7 @@ func (this *Paxos[TOp, TRes]) pullRootData(index int) (*PaxosCoreData[PartitionO
 
 	if err != nil {
 		if index < this.discovery.GetKnownHosts().Cardinality() - 1 {
-			return this.pullRootData(index + 1)
+			return this.pullRootData(hosts, index + 1)
 		}
 		return nil, err
 	}
@@ -159,11 +218,11 @@ func (this *Paxos[TOp, TRes]) pullRootData(index int) (*PaxosCoreData[PartitionO
 	return &data, nil
 }
 
-// Call if another server has already started
+// Call if another server has already started. Will also bootstrap any existing partitions
 func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 	this.logger.Info("Bootstrapping from existing...")
 
-	data, err := this.pullRootData(0)
+	data, err := this.pullRootData(this.discovery.GetKnownHosts().ToSlice(), 0)
 	if err != nil {
 		return err
 	}
@@ -176,7 +235,20 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 
 	// Join the cluster if we haven't already
 	if !this.rootNode.isInPool(this.rootNode.HighestSlot, this.rootNode.Id) {
-		this.rootNode.client.Join(this.rootNode.Id)
+		err := this.rootNode.client.Join(this.rootNode.Id)
+		if err != nil {
+			this.logger.Error("Couldn't bootstrap from existing.", "error", err)
+			return err
+		}
+	}
+
+	partitions := this.rootNode.GetState()
+	this.logger.Info("Bootstrapping individual partitions", "partitions", partitions)
+
+	if partitions != nil {
+		for partition := range partitions.Iter() {
+			go this.BootstrapPartitionFromExisting(partition)
+		}
 	}
 
 	this.logger.Info("Bootstrapped from existing!")
@@ -196,6 +268,8 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 		return err
 	}
 
+	this.createNodeForPartition(partition, nil)
+
 	this.logger.Info("Bootstrapped partition!")
 	return nil
 }
@@ -203,29 +277,13 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 // Pulls and locally creates one partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
 	var data PaxosCoreData[TOp, TRes]
-	_, err := this.client.Get(this.rootNode.Leader, ROOT_SERVER_PREFIX + PAXOS_PULL_ROUTE, nil, &data)
+	_, err := this.client.Get(this.rootNode.Leader,  PAXOS_PULL_ROUTE + "/" + partition, nil, &data)
 
 	if err != nil {
 		return err
 	}
 
-	partition = data.Partition
-
-	client := HttpPaxosClient[TOp, TRes]{
-		client: Http(this.token, this.logger),
-		logger: this.logger,
-		node: nil, // Make sure to set node later!
-		getRecipients: func() []string {
-			return this.partitions[partition].node.GetPoolForSlot(this.rootNode.HighestSlot).ToSlice()
-		},
-	}
-	node := NewPaxosNode[TOp, TRes](this.discovery.Address, partition, &client, this.logger, data.GetPoolForSlot(data.HighestSlot))
-	client.node = node
-
-	this.partitions[partition] = PaxosPartition[TOp, TRes]{
-		node, &client,
-	}
-	this.server.nodes[partition] = node
+	client, node := this.createNodeForPartition(data.Partition, &data)
 
 	err = client.Join(node.Id)
 	if err != nil {
@@ -241,5 +299,24 @@ func (this *Paxos[TOp, TRes]) GetPartitions() mapset.Set[string] {
 
 // Returns what the root node's pool will be after all committed pool changes take effect (effectively HighestSlot + POOL_DELAY)
 func (this *Paxos[TOp, TRes]) GetRootPool() mapset.Set[string] {
+	this.rootNode.mutex.Lock()
+	defer this.rootNode.mutex.Unlock()
+
 	return this.rootNode.GetPoolForSlot(this.rootNode.HighestSlot + POOL_DELAY)
+}
+
+func (this *Paxos[TOp, TRes]) GetRootLeader() string {
+	this.rootNode.mutex.Lock()
+	defer this.rootNode.mutex.Unlock()
+
+	return this.rootNode.Leader
+}
+
+func (this *Paxos[TOp, TRes]) GetPartitionLeader(partition string) string {
+	node := this.partitions[partition].node
+
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+
+	return node.Leader
 }

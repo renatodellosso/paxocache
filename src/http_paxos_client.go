@@ -20,7 +20,9 @@ type HttpPaxosClient[TOp comparable, TRes any] struct {
 	// Defaults to "" (no prefix)
 	prefix string
 
-	getRecipients func() []string
+	getRecipients func(slot uint64) []string
+	// Gets everyone, including those not in the current pool
+	getAllRecipients func(slot uint64) []string
 }
 
 // Export fields so JSON serializes them
@@ -39,8 +41,16 @@ type AcceptPayload struct {
 	SlotIndex uint64
 }
 
-func (this *HttpPaxosClient[TOp, TRes]) forEachRecipient(f func(string)) {
-	for _, host := range this.getRecipients() {
+func (this *HttpPaxosClient[TOp, TRes]) forEachRecipient(includeAll bool, slot uint64, f func(string)) {
+	var recipients []string 
+
+	if includeAll {
+		recipients = this.getAllRecipients(slot)
+	} else {
+		recipients = this.getRecipients(slot)
+	}
+
+	for _, host := range recipients {
 		go f(host)
 	}
 }
@@ -62,8 +72,12 @@ func (this *HttpPaxosClient[TOp, TRes]) Prepare(ballot Ballot) {
 
 		this.node.ReceivePromise(res.From, res.Ballot, res.Success, res.Acceptances)
 	}
+
+	this.node.mutex.Lock()
+	slot := this.node.HighestSlot
+	this.node.mutex.Unlock()
 	
-	this.forEachRecipient(send)
+	this.forEachRecipient(false, slot, send)
 }
 
 func (this *HttpPaxosClient[TOp, TRes]) RequestAcceptance(slot Slot[TOp]) {
@@ -73,8 +87,8 @@ func (this *HttpPaxosClient[TOp, TRes]) RequestAcceptance(slot Slot[TOp]) {
 
 		this.node.ReceiveAccept(res.From, res.Ballot, res.Success, res.SlotIndex)
 	}
-	
-	this.forEachRecipient(send)
+
+	this.forEachRecipient(false, slot.Number, send)
 }
 
 func (this *HttpPaxosClient[TOp, TRes]) Commit(slot Slot[TOp]) {
@@ -83,7 +97,7 @@ func (this *HttpPaxosClient[TOp, TRes]) Commit(slot Slot[TOp]) {
 		this.client.Post(host, this.prefix + PAXOS_COMMIT_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
 	}
 	
-	this.forEachRecipient(send)
+	this.forEachRecipient(true, slot.Number, send)
 }
 
 func (this *HttpPaxosClient[TOp, TRes]) Join(from string) error {
