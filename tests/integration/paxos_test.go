@@ -2,7 +2,6 @@ package integration
 
 import (
 	"log/slog"
-	"os"
 	paxocache "paxocache/src"
 	"paxocache/tests"
 	"testing"
@@ -10,14 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBootstrapClusterCreatesClusterThatCanCreatePartitions(t *testing.T) {
-	// Don't use synctest unless we mock networking
-
-	// logger := tests.SilentLogger()
-	options := slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &options))
+func createTestStack(logger *slog.Logger) (*paxocache.Listener, *paxocache.ServerDiscoveryService, *paxocache.Paxos[any, any]) {
 	listener := paxocache.Listener{
 		Logger: logger,
 		Token: "",
@@ -29,6 +21,15 @@ func TestBootstrapClusterCreatesClusterThatCanCreatePartitions(t *testing.T) {
 
 	paxos := paxocache.NewPaxos[any, any](logger, discovery)
 	paxos.RegisterListener(&listener)
+
+	return &listener, discovery, paxos
+}
+
+func TestBootstrapClusterWorksForSingleNodeCluster(t *testing.T) {
+	// Don't use synctest unless we mock networking
+
+	logger := tests.SilentLogger()
+	_, _, paxos := createTestStack(logger)
 
 	partition := "test"
 
@@ -42,4 +43,23 @@ func TestBootstrapClusterCreatesClusterThatCanCreatePartitions(t *testing.T) {
 	partitions := paxos.GetPartitions()
 	assert.NotNilf(t, partitions, "Partitions is nil!")
 	assert.ElementsMatch(t, []string{partition}, partitions.ToSlice())
+}
+
+func TestBootstrapFromExistingWorks(t *testing.T) {
+	// logger := tests.SilentLogger()
+	logger := tests.DebugLogger()
+
+	_, discoveryA, paxosA := createTestStack(logger)
+	_, discoveryB, paxosB := createTestStack(logger)
+
+	assert.Nilf(t, paxosA.BootstrapCluster(), "paxosA failed to bootstrap cluster!")
+	assert.Nilf(t, discoveryB.ExchangeWith(discoveryA.Address, true), "discoveryB failed to exchange with discoveryA!")
+
+	assert.Nilf(t, paxosB.BootstrapFromExisting(), "paxosB failed to bootstrap from existing!")
+
+	poolA := paxosA.GetRootPool().ToSlice()
+	poolB := paxosA.GetRootPool().ToSlice()
+
+	assert.ElementsMatch(t, []string{discoveryA.Address, discoveryB.Address}, poolA)
+	assert.ElementsMatch(t, []string{discoveryA.Address, discoveryB.Address}, poolB)
 }

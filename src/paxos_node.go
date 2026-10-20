@@ -116,7 +116,7 @@ type PaxosCoreData[TOp comparable, TRes any] struct {
 	Leader string
 
 	// Maps slot number to pool
-	Pools map[uint64]mapset.Set[string]
+	Pools PoolMap
 
 	// Highest ballot we've promised
 	PromisedBallot Ballot
@@ -157,27 +157,14 @@ type PaxosNode[TOp comparable, TRes any] struct {
 }
 
 func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
-	node := PaxosNode[TOp, TRes]{
-		Id: id,
+	data := PaxosCoreData[TOp, TRes]{
 		Partition: partition,
-
-		client: client,
-		logger: logger,
-
-		// We only seen the first POOL_DELAY slots, so we -1
 		HighestSlot: POOL_DELAY - 1,
-
 		Pools: make(map[uint64]mapset.Set[string]),
-
-		LeadershipVoters: mapset.NewSet[string](),
-		BallotPromisedBy: mapset.NewSet[string](),
-		PhaseOneAcceptances: make(map[uint64]Slot[TOp]),
-		RecoveredSlots: mapset.NewSet[uint64](),
-
-		Acceptances: make(map[uint64]Slot[TOp]),
-		PendingAcceptances: make(map[uint64]PendingSlot[TOp]),
 		Chosen: make(map[uint64]ChosenSlot[TOp]),
 	}
+	
+	node := NewPaxosNodeFromCoreData(id, client, logger, &data)
 
 	// Bootstrap our starting pools
 	for i := range uint64(POOL_DELAY) {
@@ -186,6 +173,27 @@ func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client 
 			Number: i,
 			Operation: nil,
 		}
+	}
+
+	return node
+}
+
+func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, data *PaxosCoreData[TOp, TRes]) *PaxosNode[TOp, TRes] {
+	node := PaxosNode[TOp, TRes]{
+		PaxosCoreData: *data,
+
+		Id: id,
+
+		client: client,
+		logger: logger,
+
+		LeadershipVoters: mapset.NewSet[string](),
+		BallotPromisedBy: mapset.NewSet[string](),
+		PhaseOneAcceptances: make(map[uint64]Slot[TOp]),
+		RecoveredSlots: mapset.NewSet[uint64](),
+
+		Acceptances: make(map[uint64]Slot[TOp]),
+		PendingAcceptances: make(map[uint64]PendingSlot[TOp]),
 	}
 
 	return &node

@@ -18,6 +18,14 @@ func SilentLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &options))
 }
 
+func DebugLogger() *slog.Logger {
+	options := slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}
+	
+	return slog.New(slog.NewJSONHandler(os.Stdout, &options))
+}
+
 type MockHttpClient struct {
 	MockGet func(url string, path string, payload any, result any) (int, error)
 	MockPost func(url string, path string, payload any, result any) (int, error)

@@ -86,7 +86,7 @@ func (this *Paxos[TOp, TRes]) RegisterListener(listener *Listener) {
 
 // Make this Paxos[T] ready to function
 func (this *Paxos[TOp, TRes]) Bootstrap() {
-	if this.discovery.GetKnownHosts().Difference(mapset.NewSet(this.discovery.address)).IsEmpty() {
+	if this.discovery.GetKnownHosts().Difference(mapset.NewSet(this.discovery.Address)).IsEmpty() {
 		this.BootstrapCluster()
 		return
 	}
@@ -94,8 +94,8 @@ func (this *Paxos[TOp, TRes]) Bootstrap() {
 	this.BootstrapFromExisting()
 }
 
-// Creates and sets rootNode
-func (this *Paxos[TOp, TRes]) createRootNode() error {
+// Creates and sets rootNode. Pass nil for data if this is the first node in the cluster
+func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosCoreData[PartitionOperation, mapset.Set[string]]) error {
 	rootClient := HttpPaxosClient[PartitionOperation, mapset.Set[string]]{
 		client: Http(this.token, this.logger),
 		logger: this.logger,
@@ -106,7 +106,12 @@ func (this *Paxos[TOp, TRes]) createRootNode() error {
 		},
 	}
 
-	this.rootNode = NewPaxosNode[PartitionOperation, mapset.Set[string]](this.discovery.address, "", &rootClient, this.logger, mapset.NewSet(this.discovery.address))
+	if data != nil {
+		this.rootNode = NewPaxosNodeFromCoreData(this.discovery.Address, &rootClient, this.logger, data)
+	} else {
+		this.rootNode = NewPaxosNode[PartitionOperation, mapset.Set[string]](this.discovery.Address, "", &rootClient, this.logger, mapset.NewSet(this.discovery.Address))
+	}
+
 	this.rootNode.ProcessOperation = processPartitionOperation
 	this.rootNode.Partition = ROOT_PARTITION
 
@@ -121,7 +126,7 @@ func (this *Paxos[TOp, TRes]) createRootNode() error {
 func (this *Paxos[TOp, TRes]) BootstrapCluster() error {
 	this.logger.Info("Bootstrapping cluster...")
 
-	err := this.createRootNode()
+	err := this.createRootNode(nil)
 	if err != nil {
 		this.logger.Error("Couldn't bootstrap cluster.", "error", err)
 		return err
@@ -131,9 +136,48 @@ func (this *Paxos[TOp, TRes]) BootstrapCluster() error {
 	return nil
 }
 
-// Call if another server has already started
-func (this *Paxos[TOp, TRes]) BootstrapFromExisting() {
+func (this *Paxos[TOp, TRes]) pullRootData(index int) (*PaxosCoreData[PartitionOperation, mapset.Set[string]], error) {
+	// Never pull from ourselves!
+	host := this.discovery.GetKnownHosts().ToSlice()[index]
+	if host == this.discovery.Address {
+		return this.pullRootData(index + 1)
+	}
 
+	var data PaxosCoreData[PartitionOperation, mapset.Set[string]]
+	_, err := this.client.Get(host, ROOT_SERVER_PREFIX + PAXOS_PULL_ROUTE + "/" + ROOT_PARTITION, nil, &data)
+
+	if err != nil {
+		if index < this.discovery.GetKnownHosts().Cardinality() - 1 {
+			return this.pullRootData(index + 1)
+		}
+		return nil, err
+	}
+
+	return &data, nil
+}
+
+// Call if another server has already started
+func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
+	this.logger.Info("Bootstrapping from existing...")
+
+	data, err := this.pullRootData(0)
+	if err != nil {
+		return err
+	}
+
+	err = this.createRootNode(data)
+	if err != nil {
+		this.logger.Error("Couldn't bootstrap from existing.", "error", err)
+		return err
+	}
+
+	// Join the cluster if we haven't already
+	if !this.rootNode.isInPool(this.rootNode.HighestSlot, this.rootNode.Id) {
+		this.rootNode.client.Join(this.rootNode.Id)
+	}
+
+	this.logger.Info("Bootstrapped from existing!")
+	return nil
 }
 
 func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
@@ -172,7 +216,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 			return this.partitions[partition].node.GetPoolForSlot(this.rootNode.HighestSlot).ToSlice()
 		},
 	}
-	node := NewPaxosNode[TOp, TRes](this.discovery.address, partition, &client, this.logger, data.GetPoolForSlot(data.HighestSlot))
+	node := NewPaxosNode[TOp, TRes](this.discovery.Address, partition, &client, this.logger, data.GetPoolForSlot(data.HighestSlot))
 	client.node = node
 
 	this.partitions[partition] = PaxosPartition[TOp, TRes]{
@@ -190,4 +234,9 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 
 func (this *Paxos[TOp, TRes]) GetPartitions() mapset.Set[string] {
 	return this.rootNode.GetState()
+}
+
+// Returns what the root node's pool will be after all committed pool changes take effect (effectively HighestSlot + POOL_DELAY)
+func (this *Paxos[TOp, TRes]) GetRootPool() mapset.Set[string] {
+	return this.rootNode.GetPoolForSlot(this.rootNode.HighestSlot + POOL_DELAY)
 }

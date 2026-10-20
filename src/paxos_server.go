@@ -97,7 +97,10 @@ func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCore
 		return
 	}
 
-	ctx.Respond(http.StatusOK, node.getCoreData())
+	data := node.getCoreData()
+
+	this.logger.Debug("Got core data", "data", data)
+	ctx.Respond(http.StatusOK, data)
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any], any]) {

@@ -16,7 +16,7 @@ type ServerDiscoveryService struct {
 	mutex sync.RWMutex
 	knownHosts mapset.Set[string]
 	Token      string
-	address string
+	Address string
 	Logger *slog.Logger
 	Client IHttpClient
 }
@@ -43,7 +43,7 @@ func (this *ServerDiscoveryService) RegisterListener(listener *Listener) {
 		client.token = listener.Token
 	}
 
-	this.address = listener.Listener.Addr().String()
+	this.Address = listener.Listener.Addr().String()
 
 	this.mutex.Lock()
 	this.knownHosts.Add(listener.Listener.Addr().String())
@@ -61,7 +61,7 @@ func (this *ServerDiscoveryService) handleExchange(ctx RequestContext[ExchangePa
 
 	ctx.Respond(http.StatusOK, ExchangePayload{
 		hosts,
-		this.address,
+		this.Address,
 	})
 
 	this.learnNewHosts(body.KnownHosts, true, body.SentFrom)
@@ -87,7 +87,7 @@ func (this *ServerDiscoveryService) ExchangeWith(host string, contactNewHosts bo
 	var res ExchangePayload
 	_, err := this.Client.Post(host, EXCHANGE_PATH, ExchangePayload{
 		hosts,
-		this.address,
+		this.Address,
 	}, &res)
 
 	this.Logger.Info("Received knownHosts", "hosts", res.KnownHosts)
