@@ -102,6 +102,9 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosCoreData[PartitionOperat
 		node: nil, // Make sure to set node later!
 		prefix: this.rootServer.prefix,
 		getRecipients: func() []string {
+			this.rootNode.mutex.Lock()
+			defer this.rootNode.mutex.Unlock()
+
 			return this.rootNode.GetPoolForSlot(this.rootNode.HighestSlot).ToSlice()
 		},
 	}

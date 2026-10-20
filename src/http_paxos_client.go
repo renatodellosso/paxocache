@@ -55,6 +55,7 @@ func (this *HttpPaxosClient[TOp, TRes]) withFrom(payload any) WithFrom[any] {
 func (this *HttpPaxosClient[TOp, TRes]) Prepare(ballot Ballot) {
 	send := func(host string) {
 		var res PromisePayload[TOp]
+		
 		status, err := this.client.Post(host, this.prefix + PAXOS_PREPARE_ROUTE + "/" + this.node.Partition, this.withFrom(ballot), &res)
 
 		this.logger.Debug("Prepare result", "host", host, "status", status, "err", err, "res", res)

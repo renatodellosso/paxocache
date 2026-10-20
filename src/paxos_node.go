@@ -308,7 +308,11 @@ func (this *PaxosNode[TOp, TRes]) TryTakeLeadership(timeout time.Duration) error
 
 	wait := 50 * time.Millisecond
 	for timeout > 0 {
+		// Don't read leader without holding mutex!
+		this.mutex.Lock()
 		this.logger.Debug("Not yet leader", "id", this.Id, "partition", this.Partition, "leader", this.Leader, "timeout remaining", timeout.String(), "wait", wait.String())
+		this.mutex.Unlock()
+
 		time.Sleep(wait)
 
 		timeout -= wait
@@ -319,7 +323,10 @@ func (this *PaxosNode[TOp, TRes]) TryTakeLeadership(timeout time.Duration) error
 		this.mutex.Unlock()
 
 		if leader == this.Id {
+			this.mutex.Lock()
 			this.logger.Debug("TryTakeLeadership succeeded!", "id", this.Id, "partition", this.Partition)
+			this.mutex.Unlock()
+
 			return nil
 		}
 	}
