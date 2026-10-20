@@ -46,8 +46,7 @@ func TestBootstrapClusterWorksForSingleNodeCluster(t *testing.T) {
 }
 
 func TestBootstrapFromExistingWorks(t *testing.T) {
-	// logger := tests.SilentLogger()
-	logger := tests.DebugLogger()
+	logger := tests.SilentLogger()
 
 	_, discoveryA, paxosA := createTestStack(logger)
 	_, discoveryB, paxosB := createTestStack(logger)
