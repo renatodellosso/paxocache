@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	paxocache "paxocache/src"
@@ -48,15 +49,16 @@ func TestListenerSetsPortWhenNotProvided(t *testing.T) {
 }
 
 func TestListenerDoesNotOverridePortWhenProvided(t *testing.T) {
+	port := rand.Uint64N(1000) + 8000
 	listener := paxocache.Listener{
 		Logger: tests.SilentLogger(),
-		Port: 8000,
+		Port: port,
 	}
 
 	err := listener.Listen()
 
 	assert.Nil(t, err)
-	assert.Equal(t, uint64(8000), listener.Port)
+	assert.Equal(t, port, listener.Port)
 }
 
 func TestListenerStartListeningSuccessfully(t *testing.T) {
