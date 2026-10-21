@@ -8,7 +8,7 @@ type PaxosSingleData struct {
 	PromisedBallot Ballot
 }
 
-func PaxosSingleDataFromPersistentData[TOp comparable, TRes any](persistent *PaxosPersistentData[TOp, TRes]) *PaxosSingleData {
+func SingleData[TOp comparable, TRes any](persistent *PaxosPersistentData[TOp, TRes]) *PaxosSingleData {
 	return &PaxosSingleData{
 		Id: persistent.Id,
 		Partition: persistent.Partition,
@@ -21,10 +21,10 @@ func PaxosSingleDataFromPersistentData[TOp comparable, TRes any](persistent *Pax
 // Lock beforehand
 type PaxosPersistor[TOp comparable, TRes any] interface {
 	WriteSingleData(data *PaxosSingleData) error
-	AppendPoolOp(op *PoolChangeOp) error
 	AppendAcceptance(slot *Slot[TOp]) error
 	AppendChosen(slot *ChosenSlot[TOp]) error
-	Recover() *PaxosPersistentData[TOp, TRes]
+	HasData() (bool, error)
+	Recover() (*PaxosPersistentData[TOp, TRes], error)
 }
 
 type PaxosPersistentData[TOp comparable, TRes any] struct {

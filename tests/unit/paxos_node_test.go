@@ -45,19 +45,19 @@ func TestNewPaxosNodeSetsValues(t *testing.T) {
 	logger := tests.SilentLogger()
 	id := "id-123"
 
-	node := paxocache.NewPaxosNode[any, any](id, "", client, logger, nil, mapset.NewSet(id))
+	node := paxocache.NewPaxosNode(id, "", client, logger, tests.NewMockPersistor(), mapset.NewSet(id))
 
 	assert.Equal(t, id, node.Id)
 
 	assert.False(t, node.IsLeader())
-	assert.Equal(t, uint64(paxocache.POOL_DELAY - 1), node.HighestSlot)
+	assert.Equal(t, uint64(paxocache.POOL_DELAY-1), node.HighestSlot)
 
 	assert.Nil(t, node.LeaderBallot)
 	assert.Equal(t, paxocache.Ballot{
-		Number: 0,
+		Number:  0,
 		OwnerId: "",
 	}, node.PromisedBallot)
-	
+
 	assert.Equal(t, mapset.NewSet[string](), node.BallotPromisedBy)
 
 	assert.Equal(t, 0, len(node.PhaseOneAcceptances))
@@ -71,7 +71,7 @@ func TestGetPoolForSlotReturnsSelfForStarterPools(t *testing.T) {
 	logger := tests.SilentLogger()
 	id := "id-123"
 
-	node := paxocache.NewPaxosNode[any, any](id, "", client, logger, nil, mapset.NewSet(id))
+	node := paxocache.NewPaxosNode(id, "", client, logger, tests.NewMockPersistor(), mapset.NewSet(id))
 
 	expected := []string{id}
 	for i := range uint64(paxocache.POOL_DELAY) {
@@ -86,12 +86,12 @@ func TestGetPoolForSlotAppliesPoolChanges(t *testing.T) {
 	logger := tests.SilentLogger()
 	id := "id-123"
 
-	node := paxocache.NewPaxosNode[any, any](id, "", client, logger, nil, mapset.NewSet(id))
+	node := paxocache.NewPaxosNode(id, "", client, logger, tests.NewMockPersistor(), mapset.NewSet(id))
 
 	// Set slots 0 and 1 so changes take effect for POOL_DELAY and POOL_DELAY + 1
 	node.Chosen[0] = paxocache.ChosenSlot[any]{
 		Number: 0,
-		Type: paxocache.ChosenSlotPoolChange,
+		Type:   paxocache.ChosenSlotPoolChange,
 		PoolChange: &paxocache.PoolChangeOp{
 			Op: paxocache.PoolChangeAdd,
 			Id: "A",
@@ -99,7 +99,7 @@ func TestGetPoolForSlotAppliesPoolChanges(t *testing.T) {
 	}
 	node.Chosen[1] = paxocache.ChosenSlot[any]{
 		Number: 1,
-		Type: paxocache.ChosenSlotPoolChange,
+		Type:   paxocache.ChosenSlotPoolChange,
 		PoolChange: &paxocache.PoolChangeOp{
 			Op: paxocache.PoolChangeRemove,
 			Id: "A",
@@ -120,10 +120,10 @@ func TestTakeLeadershipTakesLeadership(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client := new(MockPaxosClient[any])
 
-		node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+		node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 		client.On("Prepare", paxocache.Ballot{
-			Number: 1,
+			Number:  1,
 			OwnerId: node.Id,
 		}).Run(func(args mock.Arguments) {
 			success, acceptances, promisedBallot := node.ReceivePrepare(node.Id, args.Get(0).(paxocache.Ballot))
@@ -133,7 +133,7 @@ func TestTakeLeadershipTakesLeadership(t *testing.T) {
 		node.TryTakeLeadership(paxocache.TIMEOUT)
 
 		assert.Equal(t, &paxocache.Ballot{
-			Number: 1,
+			Number:  1,
 			OwnerId: node.Id,
 		}, node.LeaderBallot)
 		assert.Equal(t, node.Id, node.Leader)
@@ -143,16 +143,16 @@ func TestTakeLeadershipTakesLeadership(t *testing.T) {
 
 func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
-	
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
+
 	ballot := paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: "A",
 	}
 
 	// Same number, higher owner ID
 	node.PromisedBallot = paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: "B",
 	}
 
@@ -163,7 +163,7 @@ func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 
 	// Higher number, same owner ID
 	node.PromisedBallot = paxocache.Ballot{
-		Number: 2,
+		Number:  2,
 		OwnerId: "A",
 	}
 
@@ -175,15 +175,15 @@ func TestReceivePrepareFailsIfAHigherBallotHasBeenPromised(t *testing.T) {
 
 func TestReceivePrepareSucceedsIfNoHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
-	
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
+
 	ballot := paxocache.Ballot{
-		Number: 2,
+		Number:  2,
 		OwnerId: "A",
 	}
 
 	node.PromisedBallot = paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: "B",
 	}
 
@@ -195,23 +195,23 @@ func TestReceivePrepareSucceedsIfNoHigherBallotHasBeenPromised(t *testing.T) {
 
 func TestReceivePrepareReturnsAcceptancesOnSuccess(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
-	
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
+
 	node.PromisedBallot = paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: "B",
 	}
 	node.Acceptances[1] = paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 1,
-			Type: paxocache.ChosenSlotOperation,
+			Number:    1,
+			Type:      paxocache.ChosenSlotOperation,
 			Operation: new(any(123)),
 		},
 		Ballot: node.PromisedBallot,
 	}
 
 	ballot := paxocache.Ballot{
-		Number: 2,
+		Number:  2,
 		OwnerId: "A",
 	}
 
@@ -222,27 +222,27 @@ func TestReceivePrepareReturnsAcceptancesOnSuccess(t *testing.T) {
 
 func TestReceiveRequestAcceptanceRejectsIfAHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	ballot := paxocache.Ballot{
-		Number: 2,
+		Number:  2,
 		OwnerId: node.Id,
 	}
 	node.PromisedBallot = ballot
 
 	success, _ := node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 0,
+			Number:    0,
 			Operation: new(any(123)),
 		},
 		Ballot: paxocache.Ballot{
-			Number: 1,
+			Number:  1,
 			OwnerId: node.Id,
 		},
 	})
 
 	assert.False(t, success)
-	
+
 	// Make sure no changes were made
 	assert.Equal(t, 0, len(node.Acceptances))
 	assert.Equal(t, ballot, node.PromisedBallot)
@@ -250,21 +250,21 @@ func TestReceiveRequestAcceptanceRejectsIfAHigherBallotHasBeenPromised(t *testin
 
 func TestReceiveRequestAcceptanceSucceedsIfNoHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	ballot := paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: node.Id,
 	}
 	node.PromisedBallot = ballot
 
 	success, _ := node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 0,
+			Number:    0,
 			Operation: new(any(123)),
 		},
 		Ballot: paxocache.Ballot{
-			Number: 2,
+			Number:  2,
 			OwnerId: node.Id,
 		},
 	})
@@ -274,22 +274,22 @@ func TestReceiveRequestAcceptanceSucceedsIfNoHigherBallotHasBeenPromised(t *test
 
 func TestReceiveRequestAcceptancePromisesBallotIfNoHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	ballot := paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: node.Id,
 	}
 	node.PromisedBallot = ballot
 
 	newBallot := paxocache.Ballot{
-		Number: 2,
+		Number:  2,
 		OwnerId: node.Id,
 	}
 
 	node.ReceiveRequestAcceptance(node.Id, paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 0,
+			Number:    0,
 			Operation: new(any(123)),
 		},
 		Ballot: newBallot,
@@ -300,21 +300,21 @@ func TestReceiveRequestAcceptancePromisesBallotIfNoHigherBallotHasBeenPromised(t
 
 func TestReceiveRequestAcceptanceAcceptsValueIfNoHigherBallotHasBeenPromised(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	ballot := paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: node.Id,
 	}
 	node.PromisedBallot = ballot
 
 	newBallot := paxocache.Ballot{
-		Number: 2,
+		Number:  2,
 		OwnerId: node.Id,
 	}
 	slot := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 0,
+			Number:    0,
 			Operation: new(any(123)),
 		},
 		Ballot: newBallot,
@@ -330,10 +330,10 @@ func TestReceiveRequestAcceptanceAcceptsValueIfNoHigherBallotHasBeenPromised(t *
 
 func TestReceivePromiseDoesNothingOnFailure(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	node.ReceivePromise(node.Id, paxocache.Ballot{
-		Number: 0,
+		Number:  0,
 		OwnerId: node.Id,
 	}, false, []paxocache.Slot[any]{})
 
@@ -342,15 +342,15 @@ func TestReceivePromiseDoesNothingOnFailure(t *testing.T) {
 
 func TestReceivePromiseDoesNothingOnOlderBallot(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	node.PromisedBallot = paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: node.Id,
 	}
 
 	node.ReceivePromise(node.Id, paxocache.Ballot{
-		Number: 0,
+		Number:  0,
 		OwnerId: node.Id,
 	}, false, []paxocache.Slot[any]{})
 
@@ -359,7 +359,7 @@ func TestReceivePromiseDoesNothingOnOlderBallot(t *testing.T) {
 
 func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 	node.HighestSlot = 99 // Don't gain leadership
 
 	node.Pools[1] = mapset.NewSet(node.Id, "other1", "other2")
@@ -367,28 +367,28 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 	node.Pools[3] = mapset.NewSet(node.Id, "other1", "other2")
 
 	ballot := paxocache.Ballot{
-		Number: 1,
+		Number:  1,
 		OwnerId: node.Id,
 	}
 	node.LeaderBallot = &ballot
 
 	slotA := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 1,
+			Number:    1,
 			Operation: new(any(123)),
 		},
 		Ballot: ballot,
 	}
 	slotB := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 2,
+			Number:    2,
 			Operation: new(any(456)),
 		},
 		Ballot: paxocache.Ballot{},
 	}
 	slotC := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 3,
+			Number:    3,
 			Operation: new(any(789)),
 		},
 		Ballot: paxocache.Ballot{},
@@ -399,7 +399,7 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 
 	node.ReceivePromise(node.Id, ballot, true, []paxocache.Slot[any]{slotB, slotC, {
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 1,
+			Number:    1,
 			Operation: new(any(-123)),
 		},
 		Ballot: paxocache.Ballot{},
@@ -413,20 +413,20 @@ func TestReceivePromiseSetsPhaseOneAcceptancesOnSuccess(t *testing.T) {
 
 func TestReceiveAcceptAddsToAcceptedBy(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 	node.HighestSlot = 99 // Don't gain leadership
 
 	node.Pools[1] = mapset.NewSet(node.Id, "other")
 
 	slot := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 1,
+			Number:    1,
 			Operation: new(any(123)),
 		},
 		Ballot: paxocache.Ballot{},
 	}
 	node.PendingAcceptances[slot.Number] = paxocache.PendingSlot[any]{
-		Proposal: slot,
+		Proposal:   slot,
 		AcceptedBy: mapset.NewSet[string](),
 	}
 
@@ -437,14 +437,14 @@ func TestReceiveAcceptAddsToAcceptedBy(t *testing.T) {
 
 func TestReceiveAcceptCommitsOnceQuorumIsReached(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 	node.HighestSlot = 99 // Don't gain leadership
 
 	node.Pools[1] = mapset.NewSet(node.Id)
 
 	slot := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 1,
+			Number:    1,
 			Operation: new(any(123)),
 		},
 		Ballot: paxocache.Ballot{},
@@ -453,7 +453,7 @@ func TestReceiveAcceptCommitsOnceQuorumIsReached(t *testing.T) {
 	client.On("Commit", slot)
 
 	node.PendingAcceptances[slot.Number] = paxocache.PendingSlot[any]{
-		Proposal: slot,
+		Proposal:   slot,
 		AcceptedBy: mapset.NewSet[string](),
 	}
 
@@ -464,18 +464,18 @@ func TestReceiveAcceptCommitsOnceQuorumIsReached(t *testing.T) {
 
 func TestReceiveAcceptCommitsIfQuorumHasAccepted(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 	node.HighestSlot = 99 // Don't gain leadership
 
 	slot := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 0,
+			Number:    0,
 			Operation: new(any(123)),
 		},
 		Ballot: paxocache.Ballot{},
 	}
 	node.PendingAcceptances[slot.Number] = paxocache.PendingSlot[any]{
-		Proposal: slot,
+		Proposal:   slot,
 		AcceptedBy: mapset.NewSet[string](),
 	}
 
@@ -488,11 +488,11 @@ func TestReceiveAcceptCommitsIfQuorumHasAccepted(t *testing.T) {
 
 func TestReceiveCommitAddsToChosen(t *testing.T) {
 	client := new(MockPaxosClient[any])
-	node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+	node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 	slot := paxocache.Slot[any]{
 		ChosenSlot: paxocache.ChosenSlot[any]{
-			Number: 0,
+			Number:    0,
 			Operation: new(any(123)),
 		},
 		Ballot: paxocache.Ballot{},
@@ -501,7 +501,7 @@ func TestReceiveCommitAddsToChosen(t *testing.T) {
 	node.ReceiveCommit(node.Id, slot)
 
 	assert.Equal(t, paxocache.ChosenSlot[any]{
-		Number: slot.Number,
+		Number:    slot.Number,
 		Operation: slot.Operation,
 	}, node.Chosen[slot.Number])
 }
@@ -510,20 +510,20 @@ func TestProposeWithTimeoutRequestsAcceptance(t *testing.T) {
 	// Using synctest makes Time.sleep use fake time instead of real time
 	synctest.Test(t, func(t *testing.T) {
 		client := new(MockPaxosClient[any])
-		node := paxocache.NewPaxosNode[any, any]("id", "", client, tests.SilentLogger(), nil, mapset.NewSet("id"))
+		node := paxocache.NewPaxosNode("id", "", client, tests.SilentLogger(), tests.NewMockPersistor(), mapset.NewSet("id"))
 
 		node.LeaderBallot = &paxocache.Ballot{
-			Number: 0,
+			Number:  0,
 			OwnerId: node.Id,
 		}
 		node.Leader = node.Id
 
 		val := 1
 		slot := paxocache.Slot[any]{
-			Number: node.HighestSlot + 1,
-			Type: paxocache.ChosenSlotOperation,
+			Number:    node.HighestSlot + 1,
+			Type:      paxocache.ChosenSlotOperation,
 			Operation: new(any(val)),
-			Ballot: *node.LeaderBallot,
+			Ballot:    *node.LeaderBallot,
 		}
 
 		client.On("RequestAcceptance", slot).Run(func(args mock.Arguments) {

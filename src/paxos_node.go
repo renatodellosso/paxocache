@@ -18,9 +18,9 @@ type PaxosNode[TOp comparable, TRes any] struct {
 
 	mutex sync.Mutex
 
-	client PaxosClient[TOp]
-	logger *slog.Logger
-	persistor *PaxosPersistor[TOp, TRes]
+	client    PaxosClient[TOp]
+	logger    *slog.Logger
+	persistor PaxosPersistor[TOp, TRes]
 
 	// Ballot we're using to claim leadership
 	LeaderBallot *Ballot
@@ -30,7 +30,7 @@ type PaxosNode[TOp comparable, TRes any] struct {
 	BallotPromisedBy mapset.Set[string]
 	// Acceptances we've seen while taking leadership
 	PhaseOneAcceptances map[uint64]Slot[TOp]
-	RecoveredSlots mapset.Set[uint64]
+	RecoveredSlots      mapset.Set[uint64]
 
 	// Acceptances currently pending
 	PendingAcceptances map[uint64]PendingSlot[TOp]
@@ -38,45 +38,52 @@ type PaxosNode[TOp comparable, TRes any] struct {
 	ProcessOperation func(op TOp, prev TRes) TRes
 }
 
-func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, persistor *PaxosPersistor[TOp, TRes], startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
+func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
 	data := PaxosCoreData[TOp, TRes]{
-		Partition: partition,
+		Partition:   partition,
 		HighestSlot: POOL_DELAY - 1,
-		Pools: make(map[uint64]mapset.Set[string]),
-		Chosen: make(map[uint64]ChosenSlot[TOp]),
+		Pools:       make(map[uint64]mapset.Set[string]),
+		Chosen:      make(map[uint64]ChosenSlot[TOp]),
 	}
-	
+
 	node := NewPaxosNodeFromCoreData(id, client, logger, persistor, &data)
 
 	// Bootstrap our starting pools
 	for i := range uint64(POOL_DELAY) {
 		node.Pools[i] = startingPool
-		node.Chosen[i] = ChosenSlot[TOp]{
-			Number: i,
+
+		slot := ChosenSlot[TOp]{
+			Number:    i,
 			Operation: nil,
 		}
+		node.Chosen[i] = slot
+
+		persistor.AppendChosen(&slot)
 	}
 
 	return node
 }
 
-func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, persistor *PaxosPersistor[TOp, TRes], data *PaxosCoreData[TOp, TRes]) *PaxosNode[TOp, TRes] {
+func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], data *PaxosCoreData[TOp, TRes]) *PaxosNode[TOp, TRes] {
 	node := PaxosNode[TOp, TRes]{
 		PaxosCoreData: *data,
 
 		Id: id,
 
-		client: client,
-		logger: logger,
+		client:    client,
+		logger:    logger,
+		persistor: persistor,
 
-		LeadershipVoters: mapset.NewSet[string](),
-		BallotPromisedBy: mapset.NewSet[string](),
+		LeadershipVoters:    mapset.NewSet[string](),
+		BallotPromisedBy:    mapset.NewSet[string](),
 		PhaseOneAcceptances: make(map[uint64]Slot[TOp]),
-		RecoveredSlots: mapset.NewSet[uint64](),
+		RecoveredSlots:      mapset.NewSet[uint64](),
 
-		Acceptances: make(map[uint64]Slot[TOp]),
+		Acceptances:        make(map[uint64]Slot[TOp]),
 		PendingAcceptances: make(map[uint64]PendingSlot[TOp]),
 	}
+
+	persistor.WriteSingleData(SingleData(&node.PaxosPersistentData))
 
 	return &node
 }
@@ -84,7 +91,7 @@ func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosC
 func (this *PaxosNode[TOp, TRes]) getCoreData() PaxosCoreData[TOp, TRes] {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
-	
+
 	// Copy everything in the core data struct
 	data := this.PaxosCoreData
 	data.Chosen = maps.Clone(data.Chosen)
@@ -104,7 +111,7 @@ func (this *PaxosNode[TOp, TRes]) quorumSize(slot uint64) int {
 		return math.MaxInt
 	}
 
-	return pool.Cardinality() / 2 + 1
+	return pool.Cardinality()/2 + 1
 }
 
 // Lock beforehand
@@ -140,8 +147,8 @@ func (this *PaxosCoreData[TOp, TRes]) GetPoolForSlot(slot uint64) mapset.Set[str
 	if prevPool == nil {
 		return nil
 	}
-	
-	prevSlot, ok := this.Chosen[slot - POOL_DELAY];
+
+	prevSlot, ok := this.Chosen[slot-POOL_DELAY]
 	if !ok {
 		return nil
 	}
@@ -172,7 +179,7 @@ func (this *PaxosNode[TOp, TRes]) TryTakeLeadership(timeout time.Duration) error
 	}
 
 	this.LeaderBallot = &Ballot{
-		Number: nextBallot,
+		Number:  nextBallot,
 		OwnerId: this.Id,
 	}
 
@@ -220,6 +227,8 @@ func (this *PaxosNode[TOp, TRes]) TryTakeLeadership(timeout time.Duration) error
 func (this *PaxosNode[TOp, TRes]) gainLeadership() {
 	this.logger.Debug("Gained leadership", "id", this.Id, "partition", this.Partition)
 	this.Leader = this.Id
+
+	this.persistor.WriteSingleData(SingleData(&this.PaxosPersistentData))
 }
 
 func (this *PaxosNode[TOp, TRes]) IsLeader() bool {
@@ -234,7 +243,14 @@ func (this *PaxosNode[TOp, TRes]) promiseBallot(ballot Ballot) bool {
 		return false // Never promise a lower ballot
 	}
 
+	old := this.PromisedBallot
 	this.PromisedBallot = ballot
+	err := this.persistor.WriteSingleData(SingleData(&this.PaxosPersistentData))
+	if err != nil {
+		this.PromisedBallot = old
+		return false
+	}
+
 	if this.LeaderBallot != nil && this.PromisedBallot.GreaterThan(*this.LeaderBallot) {
 		return true
 	}
@@ -246,7 +262,7 @@ func (this *PaxosNode[TOp, TRes]) promiseBallot(ballot Ballot) bool {
 func (this *PaxosNode[TOp, TRes]) ReceivePrepare(from string, ballot Ballot) (bool, []Slot[TOp], Ballot) {
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
-	
+
 	if this.PromisedBallot.GreaterThan(ballot) {
 		this.logger.Debug("ReceivePrepare", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", false, "acceptances", nil)
 		return false, nil, this.PromisedBallot
@@ -255,7 +271,7 @@ func (this *PaxosNode[TOp, TRes]) ReceivePrepare(from string, ballot Ballot) (bo
 	this.promiseBallot(ballot)
 
 	this.logger.Debug("ReceivePrepare", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", true, "acceptances", this.Acceptances)
-	
+
 	acceptances := slices.Collect(maps.Values(this.Acceptances))
 	if acceptances == nil {
 		acceptances = []Slot[TOp]{}
@@ -267,7 +283,15 @@ func (this *PaxosNode[TOp, TRes]) ReceiveRequestAcceptance(from string, slot Slo
 	this.mutex.Lock()
 	defer this.mutex.Unlock()
 
+	prevLeader := this.Leader
 	this.Leader = from
+
+	if prevLeader != this.Leader {
+		err := this.persistor.WriteSingleData(SingleData(&this.PaxosPersistentData))
+		if err != nil {
+			return false, this.PromisedBallot
+		}
+	}
 
 	if this.PromisedBallot.GreaterThan(slot.Ballot) {
 		this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "partition", this.Partition, "from", from, "ballot", slot.Ballot, "slot", slot, "success", false, "reason", "Promised higher ballot")
@@ -281,14 +305,22 @@ func (this *PaxosNode[TOp, TRes]) ReceiveRequestAcceptance(from string, slot Slo
 
 	if slot.Number > this.HighestSlot {
 		this.HighestSlot = slot.Number
+
+		err := this.persistor.WriteSingleData(SingleData(&this.PaxosPersistentData))
+		if err != nil {
+			return false, this.PromisedBallot
+		}
 	}
 
+	if this.persistor.AppendAcceptance(&slot) != nil {
+		return false, this.PromisedBallot
+	}
 	this.Acceptances[slot.Number] = slot
 	// Never accept anything below this ballot now
 	this.promiseBallot(slot.Ballot)
 
 	this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "partition", this.Partition, "from", from, "ballot", slot.Ballot, "slot", slot, "success", true)
-	
+
 	return true, this.PromisedBallot
 }
 
@@ -297,7 +329,7 @@ func (this *PaxosNode[TOp, TRes]) ReceivePromise(from string, ballot Ballot, suc
 	this.mutex.Lock()
 
 	this.logger.Debug("ReceivePromise", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", success, "acceptances", acceptances)
-	
+
 	if !success {
 		this.logger.Debug("ReceivePromise", "id", this.Id, "partition", this.Partition, "from", from, "accepted", false, "reason", "From did not promise successfully")
 		this.mutex.Unlock() // Make sure to unlock!
@@ -318,7 +350,7 @@ func (this *PaxosNode[TOp, TRes]) ReceivePromise(from string, ballot Ballot, suc
 
 	// Might be older than our current voter pool, but we still need it for recovery
 	this.BallotPromisedBy.Add(from)
-	
+
 	for _, val := range acceptances {
 		// If val has a higher ballot or is the first we've seen, record it
 		if prev, ok := this.PhaseOneAcceptances[val.Number]; !this.RecoveredSlots.Contains(val.Number) && (!ok || val.Ballot.GreaterThan(prev.Ballot)) {
@@ -326,7 +358,7 @@ func (this *PaxosNode[TOp, TRes]) ReceivePromise(from string, ballot Ballot, suc
 		}
 	}
 
-	if this.BallotPromisedBy.Intersect(this.LeadershipVoters).Cardinality() >= this.LeadershipVoters.Cardinality() / 2 + 1 {
+	if this.BallotPromisedBy.Intersect(this.LeadershipVoters).Cardinality() >= this.LeadershipVoters.Cardinality()/2+1 {
 		// We're the leader!
 		this.gainLeadership()
 	}
@@ -339,8 +371,8 @@ func (this *PaxosNode[TOp, TRes]) ReceivePromise(from string, ballot Ballot, suc
 		}
 
 		val.Ballot = *this.LeaderBallot
-		this.PendingAcceptances[num] = PendingSlot[TOp] {
-			Proposal: val,
+		this.PendingAcceptances[num] = PendingSlot[TOp]{
+			Proposal:   val,
 			AcceptedBy: mapset.NewSet[string](),
 		}
 		delete(this.PhaseOneAcceptances, num)
@@ -362,9 +394,9 @@ func (this *PaxosNode[TOp, TRes]) ReceivePromise(from string, ballot Ballot, suc
 // Response from sending RequestAcceptance
 func (this *PaxosNode[TOp, TRes]) ReceiveAccept(from string, ballot Ballot, success bool, slotIndex uint64) {
 	this.mutex.Lock()
-	
+
 	this.logger.Debug("ReceiveAccept", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
-	
+
 	if !success || this.promiseBallot(ballot) || !this.isInPool(slotIndex, from) {
 		this.mutex.Unlock()
 		return
@@ -395,18 +427,19 @@ func (this *PaxosNode[TOp, TRes]) ReceiveCommit(from string, slot Slot[TOp]) {
 
 	this.Leader = from
 
-
 	if slot.Number > this.HighestSlot {
 		this.HighestSlot = slot.Number
 	}
 
 	delete(this.PendingAcceptances, slot.Number)
 	this.Chosen[slot.Number] = ChosenSlot[TOp]{
-		Number: slot.Number,
-		Type: slot.Type,
-		Operation: slot.Operation,
+		Number:     slot.Number,
+		Type:       slot.Type,
+		Operation:  slot.Operation,
 		PoolChange: slot.PoolChange,
 	}
+	
+	this.persistor.AppendChosen(&slot.ChosenSlot)
 }
 
 // Blocks until value is committed. Also see ProposePoolChange and ProposeNoOp
@@ -429,17 +462,17 @@ func (this *PaxosNode[TOp, TRes]) ProposeNoOp() (uint64, error) {
 // Returns (selected slot, error)
 func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, val any, timeout time.Duration) (uint64, error) {
 	this.mutex.Lock()
-	
+
 	slotNumber := this.HighestSlot + 1
 
 	this.logger.Debug("Proposing...", "slot", slotNumber, "type", slotType, "val", val, "timeout", timeout)
-	
+
 	ballot := *this.LeaderBallot
 
 	slot := Slot[TOp]{
 		Number: slotNumber,
 		Ballot: ballot,
-		Type: slotType,
+		Type:   slotType,
 	}
 
 	switch slotType {
@@ -452,7 +485,7 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 	}
 
 	this.PendingAcceptances[slotNumber] = PendingSlot[TOp]{
-		Proposal: slot,
+		Proposal:   slot,
 		AcceptedBy: mapset.NewSet[string](),
 	}
 

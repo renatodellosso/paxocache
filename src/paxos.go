@@ -117,9 +117,9 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosCoreData[PartitionOperat
 	}
 
 	if data != nil {
-		this.rootNode = NewPaxosNodeFromCoreData(this.discovery.Address, &rootClient, this.logger, nil, data)
+		this.rootNode = NewPaxosNodeFromCoreData(this.discovery.Address, &rootClient, this.logger, &NoOpPersistor[PartitionOperation, mapset.Set[string]]{}, data)
 	} else {
-		this.rootNode = NewPaxosNode[PartitionOperation, mapset.Set[string]](this.discovery.Address, "", &rootClient, this.logger, nil, mapset.NewSet(this.discovery.Address))
+		this.rootNode = NewPaxosNode[PartitionOperation, mapset.Set[string]](this.discovery.Address, "", &rootClient, this.logger, &NoOpPersistor[PartitionOperation, mapset.Set[string]]{}, mapset.NewSet(this.discovery.Address))
 	}
 
 	this.rootNode.ProcessOperation = processPartitionOperation
@@ -161,9 +161,9 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 
 	var node *PaxosNode[TOp, TRes]
 	if data != nil {
-		node = NewPaxosNodeFromCoreData(this.discovery.Address, &client, this.logger, nil, data)
+		node = NewPaxosNodeFromCoreData(this.discovery.Address, &client, this.logger, &NoOpPersistor[TOp, TRes]{}, data)
 	} else {
-		node = NewPaxosNode[TOp, TRes](this.discovery.Address, partition, &client, this.logger, nil, mapset.NewSet(this.discovery.Address))
+		node = NewPaxosNode(this.discovery.Address, partition, &client, this.logger, &NoOpPersistor[TOp, TRes]{}, mapset.NewSet(this.discovery.Address))
 	}
 	
 	client.node = node
