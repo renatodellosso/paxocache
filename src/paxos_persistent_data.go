@@ -24,6 +24,7 @@ type PaxosPersistor[TOp comparable, TRes any] interface {
 	AppendPoolOp(op *PoolChangeOp) error
 	AppendAcceptance(slot *Slot[TOp]) error
 	AppendChosen(slot *ChosenSlot[TOp]) error
+	Recover() *PaxosPersistentData[TOp, TRes]
 }
 
 type PaxosPersistentData[TOp comparable, TRes any] struct {
