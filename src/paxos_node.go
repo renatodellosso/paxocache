@@ -2,7 +2,6 @@ package paxocache
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"maps"
 	"math"
@@ -13,130 +12,15 @@ import (
 	mapset "github.com/deckarep/golang-set/v3"
 )
 
-const PAXOS_PREPARE_ROUTE = "/cache/prepare"
-const PAXOS_REQUEST_ACCEPTANCE_ROUTE = "/cache/request-acceptance"
-const PAXOS_COMMIT_ROUTE = "/cache/commit"
-const PAXOS_PULL_ROUTE = "/cache/pull"
-const PAXOS_JOIN_ROUTE = "/cache/join"
-const PAXOS_PROPOSE_ROUTE = "/cache/propose"
-
-// Allow 5 slots before pool changes take effect
-const POOL_DELAY = 5
-
-const TIMEOUT = 60 * time.Second
-
-type PoolChange int
-
-const (
-	PoolChangeAdd = iota
-	PoolChangeRemove
-)
-
-type PoolChangeOp struct {
-	Op PoolChange
-	Id string
-}
-
-type PaxosClient[T comparable] interface {
-	Prepare(Ballot)
-	RequestAcceptance(Slot[T])
-	Commit(Slot[T])
-	// Attempt to be added to the pool
-	Join(from string) error
-	Propose(val T) error
-}
-
-// Should be comparable by default
-type Ballot struct {
-	Number uint64
-	OwnerId string
-}
-
-func (this Ballot) String() string {
-	return fmt.Sprintf("ballot:%v:%v", this.Number, this.OwnerId)
-}
-
-func (this Ballot) LessThan(other Ballot) bool {
-	if this.Number == other.Number {
-		return this.OwnerId < other.OwnerId
-	}
-	
-	return this.Number < other.Number
-}
-
-func (this Ballot) GreaterThan(other Ballot) bool {
-	return this != other && !this.LessThan(other)
-}
-
-type Slot[T comparable] struct {
-	ChosenSlot[T]
-	// Highest ballot this slot was accepted with
-	Ballot Ballot
-}
- 
-type PendingSlot[T comparable] struct {
-	Proposal Slot[T]
-	AcceptedBy mapset.Set[string]
-}
-
-type ChosenSlot[T comparable] struct {
-	Number uint64
-	Type ChosenSlotType
-	Operation *T `json:"Operation,omitempty"`
-	PoolChange *PoolChangeOp `json:"PoolChange,omitempty"`
-}
-
-func (this *ChosenSlot[T]) equal(slotType ChosenSlotType, val any) bool {
-	if this.Type != slotType {
-		return false
-	}
-
-	if this.Type == ChosenSlotOperation {
-		return *this.Operation == val.(T)
-	}
-
-	if this.Type == ChosenSlotPoolChange {
-		return *this.PoolChange == val.(PoolChangeOp)
-	}
-
-	// NoOps are always equal
-	return true
-}
-
-type ChosenSlotType string
-const (
-	ChosenSlotOperation = "operation"
-	ChosenSlotPoolChange = "pool_change"
-	ChosenSlotNoOp = "no_op"
-)
-
-// Data needed to join the cluster
-type PaxosCoreData[TOp comparable, TRes any] struct {
-	Partition string
-	Leader string
-
-	// Maps slot number to pool
-	Pools PoolMap
-
-	// Highest ballot we've promised
-	PromisedBallot Ballot
-
-	// Highest slot index we've seen or promised
-	HighestSlot uint64
-
-	// Slots already chosen
-	Chosen map[uint64]ChosenSlot[TOp]
-}
-
 // Handles Multipaxos for one log
 type PaxosNode[TOp comparable, TRes any] struct {
-	PaxosCoreData[TOp, TRes]
+	PaxosPersistentData[TOp, TRes]
 
-	Id string
 	mutex sync.Mutex
 
 	client PaxosClient[TOp]
 	logger *slog.Logger
+	persistor *PaxosPersistor[TOp, TRes]
 
 	// Ballot we're using to claim leadership
 	LeaderBallot *Ballot
@@ -148,15 +32,13 @@ type PaxosNode[TOp comparable, TRes any] struct {
 	PhaseOneAcceptances map[uint64]Slot[TOp]
 	RecoveredSlots mapset.Set[uint64]
 
-	// What we've accepted, maps slot index -> highest balloted value
-	Acceptances map[uint64]Slot[TOp]
 	// Acceptances currently pending
 	PendingAcceptances map[uint64]PendingSlot[TOp]
 
 	ProcessOperation func(op TOp, prev TRes) TRes
 }
 
-func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
+func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, persistor *PaxosPersistor[TOp, TRes], startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
 	data := PaxosCoreData[TOp, TRes]{
 		Partition: partition,
 		HighestSlot: POOL_DELAY - 1,
@@ -164,7 +46,7 @@ func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client 
 		Chosen: make(map[uint64]ChosenSlot[TOp]),
 	}
 	
-	node := NewPaxosNodeFromCoreData(id, client, logger, &data)
+	node := NewPaxosNodeFromCoreData(id, client, logger, persistor, &data)
 
 	// Bootstrap our starting pools
 	for i := range uint64(POOL_DELAY) {
@@ -178,7 +60,7 @@ func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client 
 	return node
 }
 
-func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, data *PaxosCoreData[TOp, TRes]) *PaxosNode[TOp, TRes] {
+func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, persistor *PaxosPersistor[TOp, TRes], data *PaxosCoreData[TOp, TRes]) *PaxosNode[TOp, TRes] {
 	node := PaxosNode[TOp, TRes]{
 		PaxosCoreData: *data,
 
