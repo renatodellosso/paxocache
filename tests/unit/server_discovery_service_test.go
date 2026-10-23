@@ -51,7 +51,7 @@ func TestExchangeWithUnionsResponseHosts(t *testing.T) {
 	url := "http://127.0.0.1"
 
 	client := tests.MockHttpClient{
-		MockGet: func(actualUrl string, path string, payload any, result any) (int, error) {
+		MockPost: func(actualUrl string, path string, payload any, result any) (int, error) {
 			assert.Equal(t, url, actualUrl)
 			assert.Equal(t, paxocache.EXCHANGE_PATH, path)
 

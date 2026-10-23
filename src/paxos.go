@@ -58,7 +58,7 @@ type Paxos[TOp comparable, TRes any] struct {
 	logger *slog.Logger
 }
 
-func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDiscoveryService) *Paxos[TOp, TRes] {
+func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDiscoveryService, createRootPersistor func() PaxosPersistor[PartitionOperation, mapset.Set[string]], createPersistor func(partition string) PaxosPersistor[TOp, TRes]) *Paxos[TOp, TRes] {
 	paxos := Paxos[TOp, TRes]{
 		partitions: make(map[string]PaxosPartition[TOp, TRes]),
 		rootServer: PaxosServer[PartitionOperation, mapset.Set[string]]{
@@ -71,6 +71,8 @@ func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDi
 			nodes: make(map[string]*PaxosNode[TOp, TRes]),
 		},
 		discovery: discovery,
+		createRootPersistor: createRootPersistor,
+		createPersistor: createPersistor,
 		logger: logger,
 	}
 
@@ -97,22 +99,22 @@ func (this *Paxos[TOp, TRes]) Bootstrap() {
 	this.BootstrapFromExisting()
 }
 
-func (this *Paxos[TA, TB]) getDataIfExistsForPartition[TOp comparable, TRes any](persistor PaxosPersistor[TOp, TRes]) *PaxosPersistentData[TOp, TRes] {
+func (this *Paxos[TA, TB]) getDataIfExistsForPartition[TOp comparable, TRes any](persistor PaxosPersistor[TOp, TRes]) (*PaxosPersistentData[TOp, TRes], error) {
 	var data *PaxosPersistentData[TOp, TRes]
 
 	exists, err := persistor.HasData();
 	if err != nil {
-		this.logger.Error("Error when determining if root persistor has data", "error", err)
+		return nil, err
 	}
-	if exists && err == nil {
+	if exists {
 		data, err = persistor.Recover()
 
 		if err != nil {
-			this.logger.Error("Error when recovering persistent data", "error", err)
+			return nil, err
 		}
 	}
 
-	return data
+	return data, nil
 }
 
 // Creates and sets rootNode. Pass nil for data if this is the first node in the cluster
@@ -137,9 +139,9 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 	}
 
 	if data != nil {
-		this.rootNode = NewPaxosNodeFromPersistentData(this.discovery.Address, &rootClient, this.logger, &NoOpPersistor[PartitionOperation, mapset.Set[string]]{}, data)
+		this.rootNode = NewPaxosNodeFromPersistentData(this.discovery.Address, &rootClient, this.logger, *persistor, data)
 	} else {
-		this.rootNode = NewPaxosNode(this.discovery.Address, "", &rootClient, this.logger, &NoOpPersistor[PartitionOperation, mapset.Set[string]]{}, mapset.NewSet(this.discovery.Address))
+		this.rootNode = NewPaxosNode(this.discovery.Address, "", &rootClient, this.logger, *persistor, mapset.NewSet(this.discovery.Address))
 	}
 
 	this.rootNode.ProcessOperation = processPartitionOperation
@@ -205,11 +207,15 @@ func (this *Paxos[TOp, TRes]) BootstrapCluster() error {
 	this.logger.Info("Bootstrapping cluster...")
 
 	persistor := this.createRootPersistor()
-	data := this.getDataIfExistsForPartition(persistor)
-
-	err := this.createRootNode(data, &persistor)
+	data, err := this.getDataIfExistsForPartition(persistor)
 	if err != nil {
-		this.logger.Error("Couldn't bootstrap cluster.", "error", err)
+		this.logger.Error("Couldn't get recovery data (if any) for root node.", "error", err)
+		return err
+	}
+
+	err = this.createRootNode(data, &persistor)
+	if err != nil {
+		this.logger.Error("Couldn't create root node.", "error", err)
 		return err
 	}
 
@@ -251,8 +257,14 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 	}
 
 	persistor := this.createRootPersistor()
-	data := this.getDataIfExistsForPartition[PartitionOperation, mapset.Set[string]](persistor)
-	data.IntegratePulledData(pulled)
+	data, err := this.getDataIfExistsForPartition(persistor)
+
+	if err != nil {
+		this.logger.Error("Couldn't get recovery data (if any) for root node.", "error", err)
+		return err
+	}
+
+	data = MergeRecoveredAndPullData(this.discovery.Address, data, pulled)
 
 	err = this.createRootNode(data, &persistor)
 	if err != nil {
@@ -287,7 +299,12 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 
 	persistor := this.createPersistor(partition)
-	data := this.getDataIfExistsForPartition(persistor)
+	data, err := this.getDataIfExistsForPartition(persistor)
+
+	if err != nil {
+		this.logger.Error("Couldn't get recovery data (if any) for partition.", "partition", partition, "error", err)
+		return err
+	}
 
 	if data == nil {
 		// Propose creating partition as it doesn't exist
@@ -318,8 +335,14 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 	}
 
 	persistor := this.createPersistor(partition)
-	data := this.getDataIfExistsForPartition(persistor)
-	data.IntegratePulledData(&pulled)
+	data, err := this.getDataIfExistsForPartition(persistor)
+
+	if err != nil {
+		this.logger.Error("Couldn't get recovery data (if any) for partition.", "partition", partition, "error", err)
+		return err
+	}
+
+	data = MergeRecoveredAndPullData(this.discovery.Address, data, &pulled)
 
 	client, node := this.createNodeForPartition(data.Partition, data)
 

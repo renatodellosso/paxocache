@@ -36,10 +36,20 @@ type PaxosPersistentData[TOp comparable, TRes any] struct {
 	Acceptances map[uint64]Slot[TOp]
 }
 
-func (this *PaxosPersistentData[TOp, TRes]) IntegratePulledData(pulled *PaxosCoreData[TOp, TRes]) {
-	if pulled.HighestSlot > this.HighestSlot {
-		this.HighestSlot = pulled.HighestSlot
+func MergeRecoveredAndPullData[TOp comparable, TRes any](id string, recovered *PaxosPersistentData[TOp, TRes], pulled *PaxosCoreData[TOp, TRes]) *PaxosPersistentData[TOp, TRes] {
+	if recovered == nil {
+		return &PaxosPersistentData[TOp, TRes]{
+			*pulled,
+			id,
+			make(map[uint64]Slot[TOp]),
+		}
 	}
 
-	this.Leader = pulled.Leader
+	if pulled.HighestSlot > recovered.HighestSlot {
+		recovered.HighestSlot = pulled.HighestSlot
+	}
+
+	recovered.Leader = pulled.Leader
+
+	return recovered
 }

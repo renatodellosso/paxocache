@@ -40,6 +40,7 @@ type PaxosNode[TOp comparable, TRes any] struct {
 
 func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
 	data := PaxosPersistentData[TOp, TRes]{
+		Id: id,
 		Partition:   partition,
 		HighestSlot: POOL_DELAY - 1,
 		Pools:       make(map[uint64]mapset.Set[string]),

@@ -19,7 +19,7 @@ func createTestStack(logger *slog.Logger) (*paxocache.Listener, *paxocache.Serve
 	discovery := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discovery.RegisterListener(&listener)
 
-	paxos := paxocache.NewPaxos[any, any](logger, discovery)
+	paxos := paxocache.NewPaxos(logger, discovery, tests.NewMockRootPersistor, tests.NewMockPersistorWithPartition)
 	paxos.RegisterListener(&listener)
 
 	return &listener, discovery, paxos
