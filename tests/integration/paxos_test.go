@@ -6,6 +6,7 @@ import (
 	"paxocache/tests"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,7 +20,15 @@ func createTestStack(logger *slog.Logger) (*paxocache.Listener, *paxocache.Serve
 	discovery := paxocache.NewServerDiscoveryService(tests.SilentLogger())
 	discovery.RegisterListener(&listener)
 
-	paxos := paxocache.NewPaxos(logger, discovery, tests.NewMockRootPersistor, tests.NewMockPersistorWithPartition)
+	createPartitionPersistor := func(partition string) paxocache.PaxosPersistor[any, any] {
+		return &paxocache.NoOpPersistor[any, any]{}
+	}
+
+	createRootPersistor := func() paxocache.PaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]] {
+		return &paxocache.NoOpPersistor[paxocache.PartitionOperation, mapset.Set[string]]{}
+	}
+
+	paxos := paxocache.NewPaxos(logger, discovery, createRootPersistor, createPartitionPersistor)
 	paxos.RegisterListener(&listener)
 
 	return &listener, discovery, paxos
@@ -43,6 +52,38 @@ func TestBootstrapClusterWorksForSingleNodeCluster(t *testing.T) {
 	partitions := paxos.GetPartitions()
 	assert.NotNilf(t, partitions, "Partitions is nil!")
 	assert.ElementsMatch(t, []string{partition}, partitions.ToSlice())
+}
+
+func TestBootstrapClusterRecoversData(t *testing.T) {
+	logger := tests.SilentLogger()
+	_, _, paxos := createTestStack(logger)
+
+	persistor, create := tests.CreateMockRootPersistor()
+	paxos.CreateRootPersistor = create
+
+	data := paxocache.PaxosPersistentData[paxocache.PartitionOperation, mapset.Set[string]]{
+		Id: "id",
+		Partition:   "test",
+		Leader: "leader",
+		HighestSlot: paxocache.POOL_DELAY - 1,
+		Pools:       make(map[uint64]mapset.Set[string]),
+		Chosen:      make(map[uint64]paxocache.ChosenSlot[paxocache.PartitionOperation]),
+		Acceptances: make(map[uint64]paxocache.Slot[paxocache.PartitionOperation]),
+	}
+	singleData := paxocache.SingleData(&data)
+
+	persistor.On("HasData").Return(true, nil)
+	persistor.On("Recover").Return(&data, nil)
+	persistor.On("WriteSingleData", singleData).Return(nil)
+
+	err := paxos.BootstrapCluster()
+
+	assert.Nilf(t, err, "Err is not nil after bootstrapping partition!")
+
+	persistor.AssertExpectations(t)
+
+	// Use leader to check if we actually built the root node from data
+  assert.Equal(t, data.Leader, paxos.GetRootLeader())
 }
 
 func TestBootstrapFromExistingWorks(t *testing.T) {

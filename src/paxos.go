@@ -52,8 +52,8 @@ type Paxos[TOp comparable, TRes any] struct {
 	discovery *ServerDiscoveryService
 	client HttpClient
 	token string
-	createRootPersistor func() PaxosPersistor[PartitionOperation, mapset.Set[string]]
-	createPersistor func(partition string) PaxosPersistor[TOp, TRes]
+	CreateRootPersistor func() PaxosPersistor[PartitionOperation, mapset.Set[string]]
+	CreatePersistor func(partition string) PaxosPersistor[TOp, TRes]
 
 	logger *slog.Logger
 }
@@ -71,8 +71,8 @@ func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDi
 			nodes: make(map[string]*PaxosNode[TOp, TRes]),
 		},
 		discovery: discovery,
-		createRootPersistor: createRootPersistor,
-		createPersistor: createPersistor,
+		CreateRootPersistor: createRootPersistor,
+		CreatePersistor: createPersistor,
 		logger: logger,
 	}
 
@@ -206,7 +206,7 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 func (this *Paxos[TOp, TRes]) BootstrapCluster() error {
 	this.logger.Info("Bootstrapping cluster...")
 
-	persistor := this.createRootPersistor()
+	persistor := this.CreateRootPersistor()
 	data, err := this.getDataIfExistsForPartition(persistor)
 	if err != nil {
 		this.logger.Error("Couldn't get recovery data (if any) for root node.", "error", err)
@@ -256,7 +256,7 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 		return err
 	}
 
-	persistor := this.createRootPersistor()
+	persistor := this.CreateRootPersistor()
 	data, err := this.getDataIfExistsForPartition(persistor)
 
 	if err != nil {
@@ -298,7 +298,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 	this.logger.Debug("Bootstrapping partition for cluster", "partition", partition)
 
 
-	persistor := this.createPersistor(partition)
+	persistor := this.CreatePersistor(partition)
 	data, err := this.getDataIfExistsForPartition(persistor)
 
 	if err != nil {
@@ -334,7 +334,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 		return err
 	}
 
-	persistor := this.createPersistor(partition)
+	persistor := this.CreatePersistor(partition)
 	data, err := this.getDataIfExistsForPartition(persistor)
 
 	if err != nil {

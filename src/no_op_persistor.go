@@ -11,7 +11,7 @@ func (this *NoOpPersistor[TOp, TRes]) WriteSingleData(data *PaxosSingleData) err
 func (this *NoOpPersistor[TOp, TRes]) AppendPoolOp(op *PoolChangeOp) error {
 	return nil
 }
-	
+
 func (this *NoOpPersistor[TOp, TRes]) AppendAcceptance(slot *Slot[TOp]) error {
 	return nil
 }
@@ -27,3 +27,5 @@ func (this *NoOpPersistor[TOp, TRes]) HasData() (bool, error) {
 func (this *NoOpPersistor[TOp, TRes]) Recover() (*PaxosPersistentData[TOp, TRes], error) {
 	return nil, nil
 }
+
+var _ PaxosPersistor[any, any] = &NoOpPersistor[any, any]{}

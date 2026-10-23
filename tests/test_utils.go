@@ -6,6 +6,7 @@ import (
 	paxocache "paxocache/src"
 
 	mapset "github.com/deckarep/golang-set/v3"
+	"github.com/stretchr/testify/mock"
 )
 
 type Dummy struct {
@@ -57,108 +58,48 @@ func (this *MockHttpClient) Delete(url string, path string, payload any, result 
 	return this.MockDelete(url, path, payload, result)
 }
 
-type MockPersistor struct {
-	MockWriteSingleData  func(data *paxocache.PaxosSingleData) error
-	MockAppendAcceptance func(slot *paxocache.Slot[any]) error
-	MockAppendChosen     func(slot *paxocache.ChosenSlot[any]) error
-	MockHasData          func() (bool, error)
-	MockRecover          func() (*paxocache.PaxosPersistentData[any, any], error)
+type MockPaxosPersistor[TOp comparable, TRes any] struct {
+	mock.Mock
 }
 
-func NewMockPersistor() *MockPersistor {
-	return &MockPersistor{
-		MockWriteSingleData: func(*paxocache.PaxosSingleData) error {
-			return nil
-		},
-		MockAppendAcceptance: func(*paxocache.Slot[any]) error {
-			return nil
-		},
-		MockAppendChosen: func(*paxocache.ChosenSlot[any]) error {
-			return nil
-		},
-		MockHasData: func() (bool, error) {
-			return false, nil
-		},
-		MockRecover: func() (*paxocache.PaxosPersistentData[any, any], error) {
-			return nil, nil
-		},
+func (this *MockPaxosPersistor[TOp, TRes]) WriteSingleData(data *paxocache.PaxosSingleData) error {
+	return this.Called(data).Error(0)
+}
+	
+func (this *MockPaxosPersistor[TOp, TRes]) AppendPoolOp(op *paxocache.PoolChangeOp) error {
+	return this.Called(op).Error(0)
+}
+
+func (this *MockPaxosPersistor[TOp, TRes]) AppendAcceptance(slot *paxocache.Slot[TOp]) error {
+	return this.Called(slot).Error(0)
+}
+	
+func (this *MockPaxosPersistor[TOp, TRes]) AppendChosen(slot *paxocache.ChosenSlot[TOp]) error {
+	return this.Called(slot).Error(0)
+}
+	
+func (this *MockPaxosPersistor[TOp, TRes]) HasData() (bool, error) {
+	args := this.Called()
+	return args.Bool(0), args.Error(1)
+}
+	
+func (this *MockPaxosPersistor[TOp, TRes]) Recover() (*paxocache.PaxosPersistentData[TOp, TRes], error) {
+	args := this.Called()
+	return args.Get(0).(*paxocache.PaxosPersistentData[TOp, TRes]), args.Error(1)
+}
+
+var _ paxocache.PaxosPersistor[any, any] = &MockPaxosPersistor[any, any]{}
+
+func CreateMockRootPersistor() (*MockPaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]], func() paxocache.PaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]]) {
+	persistor := MockPaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]]{}
+	return &persistor, func() paxocache.PaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]] {
+		return &persistor
 	}
 }
 
-func NewMockPersistorWithPartition(partition string) paxocache.PaxosPersistor[any, any] {
-	return NewMockPersistor()
-}
-
-// Verify we implement the interface
-var _ paxocache.PaxosPersistor[any, any] = (*MockPersistor)(nil)
-
-func (this *MockPersistor) WriteSingleData(data *paxocache.PaxosSingleData) error {
-	return this.MockWriteSingleData(data)
-}
-
-func (this *MockPersistor) AppendAcceptance(slot *paxocache.Slot[any]) error {
-	return this.MockAppendAcceptance(slot)
-}
-
-func (this *MockPersistor) AppendChosen(slot *paxocache.ChosenSlot[any]) error {
-	return this.MockAppendChosen(slot)
-}
-
-func (this *MockPersistor) HasData() (bool, error) {
-	return this.MockHasData()
-}
-
-func (this *MockPersistor) Recover() (*paxocache.PaxosPersistentData[any, any], error) {
-	return this.MockRecover()
-}
-
-type MockRootPersistor struct {
-	MockWriteSingleData  func(data *paxocache.PaxosSingleData) error
-	MockAppendAcceptance func(slot *paxocache.Slot[paxocache.PartitionOperation]) error
-	MockAppendChosen     func(slot *paxocache.ChosenSlot[paxocache.PartitionOperation]) error
-	MockHasData          func() (bool, error)
-	MockRecover          func() (*paxocache.PaxosPersistentData[paxocache.PartitionOperation, mapset.Set[string]], error)
-}
-
-func NewMockRootPersistor() paxocache.PaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]] {
-	return &MockRootPersistor{
-		MockWriteSingleData: func(*paxocache.PaxosSingleData) error {
-			return nil
-		},
-		MockAppendAcceptance: func(*paxocache.Slot[paxocache.PartitionOperation]) error {
-			return nil
-		},
-		MockAppendChosen: func(*paxocache.ChosenSlot[paxocache.PartitionOperation]) error {
-			return nil
-		},
-		MockHasData: func() (bool, error) {
-			return false, nil
-		},
-		MockRecover: func() (*paxocache.PaxosPersistentData[paxocache.PartitionOperation, mapset.Set[string]], error) {
-			return nil, nil
-		},
+func CreateMockPartitionPersistor() (*MockPaxosPersistor[any, any], func(partition string) paxocache.PaxosPersistor[any, any]) {
+	persistor := MockPaxosPersistor[any, any]{}
+	return &persistor, func(partition string) paxocache.PaxosPersistor[any, any] {
+		return &persistor
 	}
-}
-
-// Verify we implement the interface
-var _ paxocache.PaxosPersistor[paxocache.PartitionOperation, mapset.Set[string]] = (*MockRootPersistor)(nil)
-
-func (this *MockRootPersistor) WriteSingleData(data *paxocache.PaxosSingleData) error {
-	return this.MockWriteSingleData(data)
-}
-
-func (this *MockRootPersistor) AppendAcceptance(slot *paxocache.Slot[paxocache.PartitionOperation]) error {
-	return this.MockAppendAcceptance(slot)
-}
-
-func (this *MockRootPersistor) AppendChosen(slot *paxocache.ChosenSlot[paxocache.PartitionOperation]) error {
-	return this.MockAppendChosen(slot)
-}
-
-func (this *MockRootPersistor) HasData() (bool, error) {
-	return this.MockHasData()
-}
-
-func (this *MockRootPersistor) Recover() (*paxocache.PaxosPersistentData[paxocache.PartitionOperation, mapset.Set[string]], error) {
-	return this.MockRecover()
 }
