@@ -39,14 +39,15 @@ type PaxosNode[TOp comparable, TRes any] struct {
 }
 
 func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
-	data := PaxosCoreData[TOp, TRes]{
+	data := PaxosPersistentData[TOp, TRes]{
 		Partition:   partition,
 		HighestSlot: POOL_DELAY - 1,
 		Pools:       make(map[uint64]mapset.Set[string]),
 		Chosen:      make(map[uint64]ChosenSlot[TOp]),
+		Acceptances: make(map[uint64]Slot[TOp]),
 	}
 
-	node := NewPaxosNodeFromCoreData(id, client, logger, persistor, &data)
+	node := NewPaxosNodeFromPersistentData(id, client, logger, persistor, &data)
 
 	// Bootstrap our starting pools
 	for i := range uint64(POOL_DELAY) {
@@ -64,11 +65,9 @@ func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client 
 	return node
 }
 
-func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], data *PaxosCoreData[TOp, TRes]) *PaxosNode[TOp, TRes] {
+func NewPaxosNodeFromPersistentData[TOp comparable, TRes any](id string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], data *PaxosPersistentData[TOp, TRes]) *PaxosNode[TOp, TRes] {
 	node := PaxosNode[TOp, TRes]{
-		PaxosCoreData: *data,
-
-		Id: id,
+		PaxosPersistentData: *data,
 
 		client:    client,
 		logger:    logger,
@@ -79,7 +78,6 @@ func NewPaxosNodeFromCoreData[TOp comparable, TRes any](id string, client PaxosC
 		PhaseOneAcceptances: make(map[uint64]Slot[TOp]),
 		RecoveredSlots:      mapset.NewSet[uint64](),
 
-		Acceptances:        make(map[uint64]Slot[TOp]),
 		PendingAcceptances: make(map[uint64]PendingSlot[TOp]),
 	}
 

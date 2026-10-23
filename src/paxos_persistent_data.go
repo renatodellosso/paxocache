@@ -35,3 +35,11 @@ type PaxosPersistentData[TOp comparable, TRes any] struct {
 	// What we've accepted, maps slot index -> highest balloted value
 	Acceptances map[uint64]Slot[TOp]
 }
+
+func (this *PaxosPersistentData[TOp, TRes]) IntegratePulledData(pulled *PaxosCoreData[TOp, TRes]) {
+	if pulled.HighestSlot > this.HighestSlot {
+		this.HighestSlot = pulled.HighestSlot
+	}
+
+	this.Leader = pulled.Leader
+}
