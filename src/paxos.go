@@ -164,7 +164,9 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 		logger: this.logger,
 		node: nil, // Make sure to set node later!
 		getRecipients: func(slot uint64) []string {
+			this.partitionMutex.RLock()
 			node := this.partitions[partition].node
+			this.partitionMutex.RUnlock()
 
 			node.mutex.Lock()
 			defer node.mutex.Unlock()
@@ -172,7 +174,9 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 			return node.GetPoolForSlot(slot).ToSlice()
 		},
 		getAllRecipients: func(slot uint64) []string {
+			this.partitionMutex.RLock()
 			node := this.partitions[partition].node
+			this.partitionMutex.RUnlock()
 
 			node.mutex.Lock()
 			defer node.mutex.Unlock()
@@ -190,10 +194,12 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 	
 	client.node = node
 
+	this.partitionMutex.Lock()
 	this.partitions[partition] = PaxosPartition[TOp, TRes]{
 		node, &client,
 	}
 	this.server.nodes[partition] = node
+	this.partitionMutex.Unlock()
 
 	if data == nil {
 		node.TryTakeLeadership(TIMEOUT)
@@ -374,7 +380,9 @@ func (this *Paxos[TOp, TRes]) GetRootLeader() string {
 }
 
 func (this *Paxos[TOp, TRes]) GetPartitionLeader(partition string) string {
+	this.partitionMutex.RLock()
 	node := this.partitions[partition].node
+	this.partitionMutex.RUnlock()
 
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
@@ -383,13 +391,17 @@ func (this *Paxos[TOp, TRes]) GetPartitionLeader(partition string) string {
 }
 
 func (this *Paxos[TOp, TRes]) GetPartitionState(partition string) TRes {
+	this.partitionMutex.RLock()
 	node := this.partitions[partition].node
+	this.partitionMutex.RUnlock()
 
 	return node.GetState()
 }
 
 func (this *Paxos[TOp, TRes]) GetPartition(partition string) (*PaxosNode[TOp, TRes], error) {
+	this.partitionMutex.RLock()
 	paxosPartition, ok := this.partitions[partition]
+	this.partitionMutex.RUnlock()
 
 	if !ok {
 		return nil, errors.New("Could not find partition: " + partition)

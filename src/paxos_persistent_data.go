@@ -1,5 +1,7 @@
 package paxocache
 
+import "maps"
+
 type PaxosSingleData struct {
 	Id string
 	Partition string
@@ -36,6 +38,12 @@ type PaxosPersistentData[TOp comparable, TRes any] struct {
 	Acceptances map[uint64]Slot[TOp]
 }
 
+// ~ means 'any type extending this'
+func CopyMap[TMap ~map[TKey]TVal, TKey comparable, TVal any](from *TMap, to *TMap) {
+	*to = make(TMap, len(*from))
+	maps.Copy((*to), *from)
+}
+
 func MergeRecoveredAndPullData[TOp comparable, TRes any](id string, recovered *PaxosPersistentData[TOp, TRes], pulled *PaxosCoreData[TOp, TRes]) *PaxosPersistentData[TOp, TRes] {
 	if recovered == nil {
 		return &PaxosPersistentData[TOp, TRes]{
@@ -45,11 +53,17 @@ func MergeRecoveredAndPullData[TOp comparable, TRes any](id string, recovered *P
 		}
 	}
 
+	res := *recovered
+
+	CopyMap(&recovered.Acceptances, &res.Acceptances)
+	CopyMap(&recovered.Chosen, &res.Chosen)
+	CopyMap(&recovered.Pools, &res.Pools)
+	
 	if pulled.HighestSlot > recovered.HighestSlot {
-		recovered.HighestSlot = pulled.HighestSlot
+		res.HighestSlot = pulled.HighestSlot
 	}
 
-	recovered.Leader = pulled.Leader
+	res.Leader = pulled.Leader
 
-	return recovered
+	return &res
 }

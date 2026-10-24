@@ -169,10 +169,13 @@ require.Nil(t, err)
 		Partition: partition,
 		Leader: "leader",
 		HighestSlot: paxocache.POOL_DELAY - 1,
-		Pools: nodeA.Pools,
+		Pools: nil,
 		Chosen:      make(map[uint64]paxocache.ChosenSlot[any]),
 		Acceptances: make(map[uint64]paxocache.Slot[any]),
 	}
+
+	// Copy by value, not by reference to avoid data race
+	paxocache.CopyMap(&nodeA.Pools, &data.Pools)
 
 	op := struct { num int }{
 		num: 123,
