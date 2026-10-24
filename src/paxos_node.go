@@ -54,9 +54,10 @@ func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client 
 	for i := range uint64(POOL_DELAY) {
 		node.Pools[i] = startingPool
 
+		var none TOp
 		slot := ChosenSlot[TOp]{
 			Number:    i,
-			Operation: nil,
+			Operation: none,
 		}
 		node.Chosen[i] = slot
 
@@ -477,7 +478,7 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 	switch slotType {
 	case ChosenSlotOperation:
 		casted := val.(TOp)
-		slot.Operation = &casted
+		slot.Operation = casted
 	case ChosenSlotPoolChange:
 		casted := val.(PoolChangeOp)
 		slot.PoolChange = &casted
@@ -545,7 +546,7 @@ func (this *PaxosNode[TOp, TRes]) GetState() TRes {
 
 		val := this.Chosen[slot]
 		if val.Type == ChosenSlotOperation {
-			res = this.ProcessOperation(*val.Operation, res)
+			res = this.ProcessOperation(val.Operation, res)
 		}
 	}
 

@@ -76,7 +76,7 @@ type PendingSlot[T comparable] struct {
 type ChosenSlot[T comparable] struct {
 	Number uint64
 	Type ChosenSlotType
-	Operation *T `json:"Operation,omitempty"`
+	Operation T `json:"Operation,omitempty"`
 	PoolChange *PoolChangeOp `json:"PoolChange,omitempty"`
 }
 
@@ -86,7 +86,7 @@ func (this *ChosenSlot[T]) equal(slotType ChosenSlotType, val any) bool {
 	}
 
 	if this.Type == ChosenSlotOperation {
-		return *this.Operation == val.(T)
+		return this.Operation == val.(T)
 	}
 
 	if this.Type == ChosenSlotPoolChange {

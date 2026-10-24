@@ -522,7 +522,7 @@ func TestProposeWithTimeoutRequestsAcceptance(t *testing.T) {
 		slot := paxocache.Slot[any]{
 			Number:    node.HighestSlot + 1,
 			Type:      paxocache.ChosenSlotOperation,
-			Operation: new(any(val)),
+			Operation: val,
 			Ballot:    *node.LeaderBallot,
 		}
 

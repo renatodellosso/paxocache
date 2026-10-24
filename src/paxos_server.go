@@ -57,6 +57,9 @@ func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[W
 		return
 	}
 
+	if payload.From == "" {
+		this.logger.Debug("Server:RequestAcceptance", "id", ctx.Req.Header.Get(REQUEST_ID_HEADER), "from", payload.From)
+	}
 	success, promisedBallot := node.ReceiveRequestAcceptance(payload.From, payload.Val)
 
 	ctx.Respond(http.StatusOK, AcceptPayload{

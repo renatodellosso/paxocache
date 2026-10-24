@@ -8,6 +8,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func createTestStack(logger *slog.Logger) (*paxocache.Listener, *paxocache.ServerDiscoveryService, *paxocache.Paxos[any, any]) {
@@ -144,4 +145,63 @@ func TestBootstrapPartitionFromExistingWorks(t *testing.T) {
 	assert.Nilf(t, paxosB.BootstrapPartitionFromExisting(partition), "Failed to bootstrap partition from existing!")
 
 	assert.ElementsMatch(t, []string{partition}, paxosB.GetPartitions().ToSlice())
+}
+
+func TestBootstrapPartitionFromExistingRecoversData(t *testing.T) {
+	logger := tests.SilentLogger()
+
+	_, discoveryA, paxosA := createTestStack(logger)
+	_, discoveryB, paxosB := createTestStack(logger)
+
+	persistor, create := tests.CreateMockPartitionPersistor()
+	paxosB.CreatePersistor = create
+
+	partition := "test"
+
+	require.Nilf(t, paxosA.BootstrapCluster(), "paxosA failed to bootstrap cluster!")
+	require.Nilf(t, paxosA.BootstrapPartitionForCluster(partition), "Failed to bootstrap partition for cluster!")
+
+nodeA, err := paxosA.GetPartition(partition)
+require.Nil(t, err)
+
+	data := paxocache.PaxosPersistentData[any, any]{
+		Id: discoveryB.Address,
+		Partition: partition,
+		Leader: "leader",
+		HighestSlot: paxocache.POOL_DELAY - 1,
+		Pools: nodeA.Pools,
+		Chosen:      make(map[uint64]paxocache.ChosenSlot[any]),
+		Acceptances: make(map[uint64]paxocache.Slot[any]),
+	}
+
+	op := struct { num int }{
+		num: 123,
+	}
+	data.Chosen[0] = paxocache.ChosenSlot[any]{
+		Number: 0,
+		Type: paxocache.ChosenSlotOperation,
+		Operation: op,
+	}
+
+	singleData := paxocache.SingleData(&data)
+
+	persistor.On("HasData").Return(true, nil)
+	persistor.On("Recover").Return(&data, nil)
+	persistor.On("WriteSingleData", singleData).Return(nil)
+
+	require.Nilf(t, discoveryB.ExchangeWith(discoveryA.Address, true), "discoveryB failed to exchange with discoveryA!")
+
+	require.Nilf(t, paxosB.BootstrapFromExisting(), "paxosB failed to bootstrap from existing!")
+
+	require.Nilf(t, paxosB.BootstrapPartitionFromExisting(partition), "Failed to bootstrap partition from existing!")
+	
+	// Set ProcessOperation after we've made the partition
+	node, err := paxosB.GetPartition(partition)
+	require.Nil(t, err)
+
+	node.ProcessOperation = func(op any, prev any) any {
+		return op.(struct { num int }).num
+	}
+
+	assert.Equal(t, op.num, paxosB.GetPartitionState(partition))
 }

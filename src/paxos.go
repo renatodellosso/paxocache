@@ -381,3 +381,19 @@ func (this *Paxos[TOp, TRes]) GetPartitionLeader(partition string) string {
 
 	return node.Leader
 }
+
+func (this *Paxos[TOp, TRes]) GetPartitionState(partition string) TRes {
+	node := this.partitions[partition].node
+
+	return node.GetState()
+}
+
+func (this *Paxos[TOp, TRes]) GetPartition(partition string) (*PaxosNode[TOp, TRes], error) {
+	paxosPartition, ok := this.partitions[partition]
+
+	if !ok {
+		return nil, errors.New("Could not find partition: " + partition)
+	}
+
+	return paxosPartition.node, nil
+}

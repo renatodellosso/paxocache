@@ -12,6 +12,7 @@ import (
 )
 
 const TOKEN_HEADER = "Bearer-Token"
+const REQUEST_ID_HEADER = "Request-Id"
 
 type Listener struct {
 	// Set to 0 to automatically choose
@@ -101,25 +102,27 @@ func (this *Listener) Listen() error {
 
 func (this *Listener) Handle[TReq any, TRes any](path string, handler func(ctx RequestContext[TReq, TRes]), writer http.ResponseWriter, req *http.Request) {
 	ctx := RequestContext[TReq, TRes]{
-			path: path,
-			Req: req,
-			writer: writer,
-			logger: this.Logger,
-		}
+		path: path,
+		Req: req,
+		writer: writer,
+		logger: this.Logger,
+	}
 
-		// Handle auth
-		token := req.Header.Get(TOKEN_HEADER)
-		if (token == "" && this.Token != "") {
-			ctx.RespondWithError(http.StatusUnauthorized, errors.New("No token sent"))
-			return
-		}
+	// Handle auth
+	this.Logger.Debug("Received request", "path", path, "request id", req.Header.Get(REQUEST_ID_HEADER))
 
-		if token != this.Token {
-			ctx.RespondWithError(http.StatusUnauthorized, errors.New("Token did not match"))
-			return
-		}
+	token := req.Header.Get(TOKEN_HEADER)
+	if (token == "" && this.Token != "") {
+		ctx.RespondWithError(http.StatusUnauthorized, errors.New("No token sent"))
+		return
+	}
 
-		handler(ctx)
+	if token != this.Token {
+		ctx.RespondWithError(http.StatusUnauthorized, errors.New("Token did not match"))
+		return
+	}
+
+	handler(ctx)
 }
 
 func (this *Listener) RegisterRoute[TReq any, TRes any](method string, path string, handler func(ctx RequestContext[TReq, TRes])) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"uuid"
 )
 
 type IHttpDoer interface {
@@ -70,9 +71,12 @@ func (this *HttpClient) request(method string, url string, path string, payload 
 	req.Header.Set("User-Agent", "Go-HTTP-Client/1.1")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(REQUEST_ID_HEADER, uuid.NewV7().String())
 	req.Header.Set(TOKEN_HEADER, this.token)
 
 	// Execute req
+	this.Logger.Debug("Sent request", "method", method, "url", url, "path", path, "request id", req.Header.Get(REQUEST_ID_HEADER))
+
 	res, err := this.Client.Do(req)
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -82,7 +86,7 @@ func (this *HttpClient) request(method string, url string, path string, payload 
 		return status, err
 	}
 
-	this.Logger.Debug("Received response", "method", method, "url", url, "path", path, "status code", res.StatusCode)
+	this.Logger.Debug("Received response", "method", method, "url", url, "path", path, "status code", res.StatusCode, "request id", req.Header.Get(REQUEST_ID_HEADER))
 
 	defer res.Body.Close()
 
