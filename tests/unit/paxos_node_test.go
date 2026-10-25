@@ -1,6 +1,7 @@
 package unit
 
 import (
+	"errors"
 	"maps"
 	paxocache "paxocache/src"
 	"paxocache/tests"
@@ -40,6 +41,25 @@ func (this *MockPaxosClient[T]) Propose(val T) error {
 	return nil
 }
 
+func setUpMockPersistorForNewNode(persistor *tests.MockPaxosPersistor[any, any], id string) {
+	persistor.On("WriteSingleData", &paxocache.PaxosSingleData{
+		Id: id,
+		Partition: "",
+		Leader: "",
+		HighestSlot: paxocache.POOL_DELAY - 1,
+	}).Return(nil)
+
+	for i := range uint64(paxocache.POOL_DELAY) {
+		var none any
+		slot := paxocache.ChosenSlot[any]{
+			Number:    i,
+			Operation: none,
+		}
+
+		persistor.On("AppendChosen", &slot).Return(nil)
+	}
+}
+
 func TestNewPaxosNodeSetsValues(t *testing.T) {
 	var client paxocache.PaxosClient[any]
 	logger := tests.SilentLogger()
@@ -64,6 +84,20 @@ func TestNewPaxosNodeSetsValues(t *testing.T) {
 	assert.Equal(t, 0, len(node.Acceptances))
 	assert.Equal(t, 0, len(node.PendingAcceptances))
 	assert.Equal(t, paxocache.POOL_DELAY, len(node.Chosen))
+}
+
+func TestNewPaxosNodePersists(t *testing.T) {
+	var client paxocache.PaxosClient[any]
+	logger := tests.SilentLogger()
+	id := "id-123"
+
+	persistor, _ := tests.CreateMockPartitionPersistor()
+
+	setUpMockPersistorForNewNode(persistor, id)
+
+	paxocache.NewPaxosNode(id, "", client, logger, persistor, mapset.NewSet(id))
+
+	persistor.AssertExpectations(t)
 }
 
 func TestGetPoolForSlotReturnsSelfForStarterPools(t *testing.T) {
@@ -115,7 +149,7 @@ func TestGetPoolForSlotAppliesPoolChanges(t *testing.T) {
 	assert.ElementsMatch(t, []string{node.Id}, res.ToSlice())
 }
 
-func TestTakeLeadershipTakesLeadership(t *testing.T) {
+func TestTryTakeLeadershipTakesLeadership(t *testing.T) {
 	// Using synctest makes Time.sleep use fake time instead of real time
 	synctest.Test(t, func(t *testing.T) {
 		client := new(MockPaxosClient[any])
@@ -218,6 +252,47 @@ func TestReceivePrepareReturnsAcceptancesOnSuccess(t *testing.T) {
 	_, acceptances, _ := node.ReceivePrepare(ballot.OwnerId, ballot)
 
 	assert.Equal(t, slices.Collect(maps.Values(node.Acceptances)), acceptances)
+}
+
+func TestReceivePrepareWritesPromisedBallot(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	id := "id"
+
+	persistor, _ := tests.CreateMockPartitionPersistor()
+	setUpMockPersistorForNewNode(persistor, id)
+
+	node := paxocache.NewPaxosNode(id, "", client, tests.SilentLogger(), persistor, mapset.NewSet("id"))
+
+
+	node.PromisedBallot = paxocache.Ballot{
+		Number:  1,
+		OwnerId: "B",
+	}
+	node.Acceptances[1] = paxocache.Slot[any]{
+		ChosenSlot: paxocache.ChosenSlot[any]{
+			Number:    1,
+			Type:      paxocache.ChosenSlotOperation,
+			Operation: new(any(123)),
+		},
+		Ballot: node.PromisedBallot,
+	}
+
+	ballot := paxocache.Ballot{
+		Number:  2,
+		OwnerId: "A",
+	}
+
+	persistor.On("WriteSingleData", &paxocache.PaxosSingleData{
+		Id: node.Id,
+		Partition: node.Partition,
+		Leader: node.Leader,
+		HighestSlot: paxocache.POOL_DELAY - 1,
+		PromisedBallot: ballot,
+	}).Return(nil)
+
+	node.ReceivePrepare(ballot.OwnerId, ballot)
+
+	persistor.AssertExpectations(t)
 }
 
 func TestReceiveRequestAcceptanceRejectsIfAHigherBallotHasBeenPromised(t *testing.T) {
@@ -326,6 +401,82 @@ func TestReceiveRequestAcceptanceAcceptsValueIfNoHigherBallotHasBeenPromised(t *
 
 	assert.True(t, ok)
 	assert.Equal(t, slot, val)
+}
+
+func TestReceiveRequestAcceptanceAppendsAcceptance(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	id := "id"
+
+	persistor, _ := tests.CreateMockPartitionPersistor()
+	setUpMockPersistorForNewNode(persistor, id)
+
+	node := paxocache.NewPaxosNode(id, "", client, tests.SilentLogger(), persistor, mapset.NewSet("id"))
+	node.Leader = id
+
+	ballot := paxocache.Ballot{
+		Number:  99,
+		OwnerId: node.Id,
+	}
+	node.PromisedBallot = ballot
+
+	newBallot := paxocache.Ballot{
+		Number:  100,
+		OwnerId: node.Id,
+	}
+	slot := paxocache.Slot[any]{
+		Number:    0,
+		Type: paxocache.ChosenSlotOperation,
+		Operation: new(any(123)),
+		Ballot: newBallot,
+	}
+
+	persistor.On("WriteSingleData", &paxocache.PaxosSingleData{
+		Id: id,
+		Partition: node.Partition,
+		Leader: id,
+		HighestSlot: node.HighestSlot,
+		PromisedBallot: newBallot,
+	}).Return(nil)
+	persistor.On("AppendAcceptance", &slot).Return(nil)
+
+	node.ReceiveRequestAcceptance(node.Id, slot)
+
+	persistor.AssertExpectations(t)
+}
+
+func TestReceiveRequestAcceptanceFailsIfAppendFails(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	id := "id"
+
+	persistor, _ := tests.CreateMockPartitionPersistor()
+	setUpMockPersistorForNewNode(persistor, id)
+
+	node := paxocache.NewPaxosNode(id, "", client, tests.SilentLogger(), persistor, mapset.NewSet("id"))
+	node.Leader = id
+
+	ballot := paxocache.Ballot{
+		Number:  99,
+		OwnerId: node.Id,
+	}
+	node.PromisedBallot = ballot
+
+	newBallot := paxocache.Ballot{
+		Number:  100,
+		OwnerId: node.Id,
+	}
+	slot := paxocache.Slot[any]{
+		Number:    0,
+		Type: paxocache.ChosenSlotOperation,
+		Operation: new(any(123)),
+		Ballot: newBallot,
+	}
+
+	persistor.On("AppendAcceptance", &slot).Return(errors.New("Injected"))
+
+	success, _ := node.ReceiveRequestAcceptance(node.Id, slot)
+
+	persistor.AssertExpectations(t)
+	assert.False(t, success)
 }
 
 func TestReceivePromiseDoesNothingOnFailure(t *testing.T) {
@@ -504,6 +655,35 @@ func TestReceiveCommitAddsToChosen(t *testing.T) {
 		Number:    slot.Number,
 		Operation: slot.Operation,
 	}, node.Chosen[slot.Number])
+}
+
+func TestReceiveCommitAppendsChosen(t *testing.T) {
+	client := new(MockPaxosClient[any])
+	id := "id"
+
+	persistor, _ := tests.CreateMockPartitionPersistor()
+	setUpMockPersistorForNewNode(persistor, id)
+
+	node := paxocache.NewPaxosNode(id, "", client, tests.SilentLogger(), persistor, mapset.NewSet("id"))
+
+	slot := paxocache.Slot[any]{
+		Number:    0,
+		Type: paxocache.ChosenSlotOperation,
+		Operation: new(any(123)),
+		Ballot: paxocache.Ballot{},
+	}
+
+	persistor.On("AppendChosen", &slot.ChosenSlot).Return(nil)
+
+	node.ReceiveCommit(node.Id, slot)
+
+	assert.Equal(t, paxocache.ChosenSlot[any]{
+		Number: slot.Number,
+		Type: slot.Type,
+		Operation: slot.Operation,
+	}, node.Chosen[slot.Number])
+
+	persistor.AssertExpectations(t)
 }
 
 func TestProposeWithTimeoutRequestsAcceptance(t *testing.T) {

@@ -439,7 +439,10 @@ func (this *PaxosNode[TOp, TRes]) ReceiveCommit(from string, slot Slot[TOp]) {
 		PoolChange: slot.PoolChange,
 	}
 	
-	this.persistor.AppendChosen(&slot.ChosenSlot)
+	err := this.persistor.AppendChosen(&slot.ChosenSlot)
+	if err != nil {
+	this.logger.Error("ReceiveCommit", "id", this.Id, "partition", this.Partition, "from", from, "slot", slot, "error", err)
+	}
 }
 
 // Blocks until value is committed. Also see ProposePoolChange and ProposeNoOp
