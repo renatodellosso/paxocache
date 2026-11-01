@@ -300,9 +300,17 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 	return nil
 }
 
+func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
+	if this.GetPartitions().Contains(partition) {
+		return this.BootstrapPartitionFromExisting(partition)
+	}
+
+	return this.BootstrapPartitionForCluster(partition)
+}
+
+// Globally creates a partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
 	this.logger.Debug("Bootstrapping partition for cluster", "partition", partition)
-
 
 	persistor := this.CreatePersistor(partition)
 	data, err := this.getDataIfExistsForPartition(persistor)
