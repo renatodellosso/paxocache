@@ -1,28 +1,90 @@
 package benchmark
 
 import (
+	"fmt"
 	paxocache "paxocache/src"
 	"paxocache/tests"
+	"strconv"
 	"testing"
 )
 
-func BenchmarkCacheGetSingleKey(b *testing.B) {
-	cache := paxocache.NewCache().
+func createCacheNetwork(b *testing.B, nodeCount int) ([]*paxocache.Cache, error) {
+	res := []*paxocache.Cache{}
+
+	for range nodeCount {
+		var prev *paxocache.Cache
+		if len(res) > 0 {
+			prev = res[len(res)-1]
+		}
+
+		cache := paxocache.NewCache().
 																			WithBasePath(b.TempDir()).
 																			WithLogger(tests.SilentLogger())
 
-	if cache.Init() != nil {
-		b.FailNow()
+		if prev != nil {
+			cache.WithKnownHost(prev.GetAddress())
+		}
+
+		err := cache.Init()
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, cache)
 	}
 
-	key := "abc"
-	val := 123
+	return res, nil
+}
 
-	if cache.Set(key, &val) != nil {
-		b.FailNow()
+func createKeyList(keyCount int) []string {
+	res := []string{}
+
+	for i := range keyCount {
+		res = append(res, strconv.Itoa(i))
 	}
 
-	for b.Loop() {
-		cache.Get[int](key)
+	return res
+}
+
+func BenchmarkCacheGet(b *testing.B) {
+	keyCounts := []int{1, 3, 5, 25, 100, 1000}
+	nodeCounts := []int{1, 2, 3, 5, 10}
+
+	for _, keyCount := range keyCounts {
+		keys := createKeyList(keyCount)
+
+		for _, nodeCount := range nodeCounts {
+			b.Run(fmt.Sprintf("keys:%d,nodes:%d", keyCount, nodeCount), func(b *testing.B) {
+				caches, err := createCacheNetwork(b, nodeCount)
+				if err != nil {
+					b.FailNow()
+				}
+
+				for _, key := range keys {
+					val := 123
+					caches[0].Set(key, &val)
+				}
+
+				keyIndex := 0
+				nodeIndex := 0
+
+				// Warm keys
+				for _, key := range keys {
+					for _, cache := range caches {
+						cache.Get[int](key)
+					}
+				}
+
+				for b.Loop() {
+					caches[nodeIndex].Get[int](keys[keyIndex])
+
+					keyIndex = (keyIndex + 1) % keyCount
+					if keyIndex == 1 {
+						// Increment such that we hit every node
+						nodeIndex = (nodeIndex + 1) % nodeCount
+					}
+				}
+			})
+		}
 	}
 }
