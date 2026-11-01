@@ -144,7 +144,9 @@ func TestBootstrapPartitionFromExistingWorks(t *testing.T) {
 	assert.Nilf(t, paxosA.BootstrapPartitionForCluster(partition), "Failed to bootstrap partition for cluster!")
 	assert.Nilf(t, paxosB.BootstrapPartitionFromExisting(partition), "Failed to bootstrap partition from existing!")
 
-	assert.ElementsMatch(t, []string{partition}, paxosB.GetPartitions().ToSlice())
+	partitions := paxosB.GetPartitions()
+	require.NotNil(t, partitions)
+	assert.ElementsMatch(t, []string{partition}, partitions.ToSlice())
 }
 
 func TestBootstrapPartitionFromExistingRecoversData(t *testing.T) {

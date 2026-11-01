@@ -36,6 +36,9 @@ type PaxosNode[TOp comparable, TRes any] struct {
 	PendingAcceptances map[uint64]PendingSlot[TOp]
 
 	ProcessOperation func(op TOp, prev TRes) TRes
+
+	CachedSlot uint64
+	CachedState TRes
 }
 
 func NewPaxosNode[TOp comparable, TRes any](id string, partition string, client PaxosClient[TOp], logger *slog.Logger, persistor PaxosPersistor[TOp, TRes], startingPool mapset.Set[string]) *PaxosNode[TOp, TRes] {
@@ -539,9 +542,12 @@ func (this *PaxosNode[TOp, TRes]) GetState() TRes {
 
 	var res TRes
 
-	expectedSlot := uint64(0)
-	// +1 so we process the last slot
-	for slot := range this.HighestSlot + 1 {
+	if this.CachedSlot != 0 {
+		res = this.CachedState
+	}
+
+	expectedSlot := this.CachedSlot
+	for slot := this.CachedSlot; slot <= this.HighestSlot; slot++ {
 		if slot > expectedSlot {
 			break
 		}
@@ -551,6 +557,11 @@ func (this *PaxosNode[TOp, TRes]) GetState() TRes {
 		if val.Type == ChosenSlotOperation {
 			res = this.ProcessOperation(val.Operation, res)
 		}
+	}
+
+	if expectedSlot > 0 {
+		this.CachedSlot = expectedSlot - 1
+		this.CachedState = res
 	}
 
 	return res
