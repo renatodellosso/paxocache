@@ -1,6 +1,7 @@
 package paxocache
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"maps"
@@ -479,7 +480,18 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 
 	slotNumber := this.HighestSlot + 1
 
+	if this.Leader != this.Id {
+		this.logger.Debug("Forwarding proposal to leader...", "type", slotType, "val", val, "timeout", timeout)
+		err := this.client.Propose(slotType, val)
+
+		return slotNumber, err
+	}
+
 	this.logger.Debug("Proposing...", "slot", slotNumber, "type", slotType, "val", val, "timeout", timeout)
+
+	if this.LeaderBallot == nil {
+		return 0, errors.New("Tried to propose with nil LeaderBallot!")
+	}
 
 	ballot := *this.LeaderBallot
 
@@ -489,12 +501,40 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 		Type:   slotType,
 	}
 
+	var castedVal any
+
 	switch slotType {
 	case ChosenSlotOperation:
-		casted := val.(TOp)
+		var casted TOp
+
+		raw, ok := val.(json.RawMessage)
+		if ok {
+			err := json.Unmarshal(raw, &casted)
+
+			if err != nil {
+				return 0, err
+			}
+		} else {
+			casted = val.(TOp)
+		}
+
+		castedVal = casted
 		slot.Operation = casted
 	case ChosenSlotPoolChange:
-		casted := val.(PoolChangeOp)
+		var casted PoolChangeOp
+
+		raw, ok := val.(json.RawMessage)
+		if ok {
+			err := json.Unmarshal(raw, &casted)
+
+			if err != nil {
+				return 0, err
+			}
+		} else {
+			casted = val.(PoolChangeOp)
+		}
+
+		castedVal = casted
 		slot.PoolChange = &casted
 	}
 
@@ -530,8 +570,8 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 		return 0, errors.New("Ran out of time")
 	}
 
-	this.logger.Debug("Something was chosen", "chosen", chosen, "type", slotType, "val", val, "slot", slotNumber, "equal", chosen.equal(slotType, val))
-	if !chosen.equal(slotType, val) {
+	this.logger.Debug("Something was chosen", "chosen", chosen, "type", slotType, "val", val, "slot", slotNumber, "equal", chosen.equal(slotType, castedVal))
+	if !chosen.equal(slotType, castedVal) {
 		// Something else was chosen try again if we have time left
 		if timeout < 0 {
 			return 0, errors.New("Something else was chosen and no time was left to retry")

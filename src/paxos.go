@@ -324,7 +324,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 	if data == nil {
 		// Propose creating partition as it doesn't exist
-		err := this.rootNode.client.Propose(PartitionOperation{
+		err := this.rootNode.client.Propose(ChosenSlotOperation, PartitionOperation{
 			PartitionCreate,
 			partition,
 		})

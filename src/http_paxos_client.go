@@ -1,6 +1,7 @@
 package paxocache
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,6 +41,11 @@ type AcceptPayload struct {
 	Ballot Ballot
 	Success bool
 	SlotIndex uint64
+}
+
+type ProposePayload struct {
+	Type ChosenSlotType
+	Val json.RawMessage
 }
 
 func (this *HttpPaxosClient[TOp, TRes]) forEachRecipient(includeAll bool, slot uint64, f func(string)) {
@@ -135,9 +141,17 @@ func (this *HttpPaxosClient[TOp, TRes]) Join(from string) error {
 	return nil
 }
 
-func (this *HttpPaxosClient[TOp, TRes]) Propose(val TOp) error {
+func (this *HttpPaxosClient[TOp, TRes]) Propose(slotType ChosenSlotType, val any) error {
+	raw, err := json.Marshal(val)
+	if err != nil {
+		return err
+	}
+
 	var res bool
-	_, err := this.client.Post(this.node.Leader, this.prefix + PAXOS_PROPOSE_ROUTE + "/" + this.node.Partition, val, &res)
+	_, err = this.client.Post(this.node.Leader, this.prefix + PAXOS_PROPOSE_ROUTE + "/" + this.node.Partition, ProposePayload{
+		Type: slotType,
+		Val: json.RawMessage(raw),
+	}, &res)
 
 	if err != nil {
 		return err

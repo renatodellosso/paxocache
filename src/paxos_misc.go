@@ -37,7 +37,7 @@ type PaxosClient[T comparable] interface {
 	Commit(Slot[T])
 	// Attempt to be added to the pool
 	Join(from string) error
-	Propose(val T) error
+	Propose(slotType ChosenSlotType, val any) error
 }
 
 // Should be comparable by default

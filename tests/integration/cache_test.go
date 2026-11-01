@@ -48,3 +48,38 @@ func TestCacheSetAndGet(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expected, *val)
 }
+
+func TestCacheSetAndGetTwoNodes(t *testing.T) {
+	cacheA := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			WithLogger(tests.SilentLogger())
+
+	require.Nil(t, cacheA.Init())
+
+	cacheB := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			// WithLogger(tests.SilentLogger()).
+																			WithKnownHost(cacheA.GetAddress())
+
+	require.Nil(t, cacheB.Init())
+
+	key := "test"
+	expectedA := 123
+	expectedB := 321
+
+	// A -> B
+	require.Nil(t, cacheA.Set(key, &expectedA))
+
+	val, err := cacheB.Get[int](key)
+
+	assert.Nil(t, err)
+	assert.Equal(t, expectedA, *val)
+
+	// B -> A
+	require.Nil(t, cacheB.Set(key, &expectedB))
+
+	val, err = cacheA.Get[int](key)
+
+	assert.Nil(t, err)
+	assert.Equal(t, expectedB, *val)
+}

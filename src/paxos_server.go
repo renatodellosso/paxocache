@@ -166,7 +166,7 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 	ctx.Respond(http.StatusOK, nil)
 }
 
-func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) {
+func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[ProposePayload, any]) {
 	this.logger.Debug(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"))
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
@@ -186,7 +186,7 @@ func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) 
 	
 	if node.Leader != node.Id {
 		// Not the leader, forward request
-		err := node.client.Propose(payload)
+		err := node.client.Propose(payload.Type, payload.Val)
 
 		if err != nil {
 			this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)
@@ -196,7 +196,7 @@ func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[TOp, any]) 
 	}
 
 	// Node is leader, propose change
-	_, err = node.Propose(payload)
+	_, err = node.ProposeWithTimeout(payload.Type, payload.Val, TIMEOUT)
 
 	if err != nil {
 		this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)

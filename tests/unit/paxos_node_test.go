@@ -36,8 +36,8 @@ func (this *MockPaxosClient[T]) Join(from string) error {
 	return nil
 }
 
-func (this *MockPaxosClient[T]) Propose(val T) error {
-	this.Called(val)
+func (this *MockPaxosClient[T]) Propose(slotType paxocache.ChosenSlotType, val any) error {
+	this.Called(slotType, val)
 	return nil
 }
 
