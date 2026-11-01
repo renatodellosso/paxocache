@@ -193,6 +193,8 @@ func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[ProposePayl
 			ctx.RespondWithError(http.StatusInternalServerError, err)
 			return
 		}
+
+		return
 	}
 
 	// Node is leader, propose change
