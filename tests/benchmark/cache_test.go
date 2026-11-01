@@ -46,9 +46,10 @@ func createKeyList(keyCount int) []string {
 	return res
 }
 
+
 func BenchmarkCacheGet(b *testing.B) {
-	keyCounts := []int{1, 3, 5, 25, 100, 1000}
-	nodeCounts := []int{1, 2, 3, 5, 10}
+	keyCounts := []int{1, 5, 100, 1000}
+	nodeCounts := []int{1, 2, 3, 5}
 
 	for _, keyCount := range keyCounts {
 		keys := createKeyList(keyCount)
@@ -77,6 +78,51 @@ func BenchmarkCacheGet(b *testing.B) {
 
 				for b.Loop() {
 					caches[nodeIndex].Get[int](keys[keyIndex])
+
+					keyIndex = (keyIndex + 1) % keyCount
+					if keyIndex == 1 {
+						// Increment such that we hit every node
+						nodeIndex = (nodeIndex + 1) % nodeCount
+					}
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkCacheSet(b *testing.B) {
+	keyCounts := []int{1, 5, 100, 1000}
+	nodeCounts := []int{1, 2, 3, 5}
+
+	for _, keyCount := range keyCounts {
+		keys := createKeyList(keyCount)
+
+		for _, nodeCount := range nodeCounts {
+			b.Run(fmt.Sprintf("keys:%d,nodes:%d", keyCount, nodeCount), func(b *testing.B) {
+				caches, err := createCacheNetwork(b, nodeCount)
+				if err != nil {
+					b.FailNow()
+				}
+
+				for _, key := range keys {
+					val := 123
+					caches[0].Set(key, &val)
+				}
+
+				keyIndex := 0
+				nodeIndex := 0
+
+				// Warm keys
+				for _, key := range keys {
+					for _, cache := range caches {
+						cache.Get[int](key)
+					}
+				}
+
+				val := 123
+
+				for b.Loop() {
+					caches[nodeIndex].Set(keys[keyIndex], &val)
 
 					keyIndex = (keyIndex + 1) % keyCount
 					if keyIndex == 1 {
