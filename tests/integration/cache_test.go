@@ -58,7 +58,7 @@ func TestCacheSetAndGetTwoNodes(t *testing.T) {
 
 	cacheB := paxocache.NewCache().
 																			WithBasePath(t.TempDir()).
-																			// WithLogger(tests.SilentLogger()).
+																			WithLogger(tests.SilentLogger()).
 																			WithKnownHost(cacheA.GetAddress())
 
 	require.Nil(t, cacheB.Init())
