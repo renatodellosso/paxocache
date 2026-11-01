@@ -3,6 +3,7 @@ package paxocache
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"unicode"
@@ -11,6 +12,17 @@ import (
 const SINGLE_DATA_FILE = "/single.json"
 const ACCEPTED_FILE = "/accepted.json"
 const CHOSEN_FILE = "/chosen.json"
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	// File exists but we can't open it due to errors
+	return false, err
+}
 
 type FilePersistor[TOp comparable, TRes any] struct{
 	BasePath string
@@ -91,6 +103,16 @@ func (this FilePersistor[TOp, TRes]) AppendChosen(slot *ChosenSlot[TOp]) error {
 }
 
 func (this FilePersistor[TOp, TRes]) HasData() (bool, error) {
+	fileExists, err := exists(this.BasePath + SINGLE_DATA_FILE)
+
+	if err != nil {
+		return false, err
+	}
+
+	if !fileExists {
+		return false, nil
+	}
+
 	file, err := os.Open(this.BasePath + SINGLE_DATA_FILE)
 
 	if err != nil {

@@ -239,11 +239,11 @@ func (this *PaxosNode[TOp, TRes]) IsLeader() bool {
 }
 
 // Returns whether we lost leadership. Lock beforehand
-func (this *PaxosNode[TOp, TRes]) promiseBallot(ballot Ballot) bool {
+func (this *PaxosNode[TOp, TRes]) promiseBallot(ballot Ballot) (bool, error) {
 	this.logger.Debug("promiseBallot", "id", this.Id, "partition", this.Partition, "IsLeader", this.IsLeader(), "ballot", ballot, "previous", this.PromisedBallot)
 
 	if this.PromisedBallot.GreaterThan(ballot) {
-		return false // Never promise a lower ballot
+		return false, nil // Never promise a lower ballot
 	}
 
 	old := this.PromisedBallot
@@ -251,14 +251,14 @@ func (this *PaxosNode[TOp, TRes]) promiseBallot(ballot Ballot) bool {
 	err := this.persistor.WriteSingleData(SingleData(&this.PaxosPersistentData))
 	if err != nil {
 		this.PromisedBallot = old
-		return false
+		return false, err
 	}
 
 	if this.LeaderBallot != nil && this.PromisedBallot.GreaterThan(*this.LeaderBallot) {
-		return true
+		return true, nil
 	}
 
-	return false
+	return false, nil
 }
 
 // Returns (success, acceptances, promised ballot)
@@ -271,7 +271,10 @@ func (this *PaxosNode[TOp, TRes]) ReceivePrepare(from string, ballot Ballot) (bo
 		return false, nil, this.PromisedBallot
 	}
 
-	this.promiseBallot(ballot)
+	_, err :=	this.promiseBallot(ballot)
+	if err != nil {
+		return false, slices.Collect(maps.Values(this.Acceptances)), this.PromisedBallot
+	}
 
 	this.logger.Debug("ReceivePrepare", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", true, "acceptances", this.Acceptances)
 
@@ -400,8 +403,13 @@ func (this *PaxosNode[TOp, TRes]) ReceiveAccept(from string, ballot Ballot, succ
 
 	this.logger.Debug("ReceiveAccept", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
 
-	if !success || this.promiseBallot(ballot) || !this.isInPool(slotIndex, from) {
+	if !success || !this.isInPool(slotIndex, from) {
 		this.mutex.Unlock()
+		return
+	}
+
+	_, err := this.promiseBallot(ballot)
+	if err != nil {
 		return
 	}
 

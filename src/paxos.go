@@ -54,6 +54,7 @@ type Paxos[TOp comparable, TRes any] struct {
 	token string
 	CreateRootPersistor func() PaxosPersistor[PartitionOperation, mapset.Set[string]]
 	CreatePersistor func(partition string) PaxosPersistor[TOp, TRes]
+	processOp func(op TOp, prev TRes) TRes
 
 	logger *slog.Logger
 }
@@ -90,13 +91,12 @@ func (this *Paxos[TOp, TRes]) RegisterListener(listener *Listener) {
 }
 
 // Make this Paxos[T] ready to function
-func (this *Paxos[TOp, TRes]) Bootstrap() {
+func (this *Paxos[TOp, TRes]) Bootstrap() error {
 	if this.discovery.GetKnownHosts().Difference(mapset.NewSet(this.discovery.Address)).IsEmpty() {
-		this.BootstrapCluster()
-		return
+		return this.BootstrapCluster()
 	}
 	
-	this.BootstrapFromExisting()
+	return this.BootstrapFromExisting()
 }
 
 func (this *Paxos[TA, TB]) getDataIfExistsForPartition[TOp comparable, TRes any](persistor PaxosPersistor[TOp, TRes]) (*PaxosPersistentData[TOp, TRes], error) {
@@ -191,6 +191,8 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 	} else {
 		node = NewPaxosNode(this.discovery.Address, partition, &client, this.logger, &NoOpPersistor[TOp, TRes]{}, mapset.NewSet(this.discovery.Address))
 	}
+
+	node.ProcessOperation = this.processOp
 	
 	client.node = node
 
@@ -369,7 +371,14 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 }
 
 func (this *Paxos[TOp, TRes]) GetPartitions() mapset.Set[string] {
-	return this.rootNode.GetState()
+	res := this.rootNode.GetState()
+
+	// Zero partitions is nil, not an empty set
+	if res == nil {
+		return mapset.NewSet[string]()
+	}
+
+	return res
 }
 
 // Returns what the root node's pool will be after all committed pool changes take effect (effectively HighestSlot + POOL_DELAY)
