@@ -163,8 +163,8 @@ func TestBootstrapPartitionFromExistingRecoversData(t *testing.T) {
 	require.Nilf(t, paxosA.BootstrapCluster(), "paxosA failed to bootstrap cluster!")
 	require.Nilf(t, paxosA.BootstrapPartitionForCluster(partition), "Failed to bootstrap partition for cluster!")
 
-nodeA, err := paxosA.GetPartition(partition)
-require.Nil(t, err)
+	nodeA, err := paxosA.GetPartition(partition)
+	require.Nil(t, err)
 
 	data := paxocache.PaxosPersistentData[any, any]{
 		Id: discoveryB.Address,

@@ -106,7 +106,7 @@ func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCore
 	ctx.Respond(http.StatusOK, data)
 }
 
-func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any], any]) {
+func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any], uint64]) {
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
 
 	if !ok {
@@ -163,7 +163,12 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 		node.mutex.Unlock()
 	}
 
-	ctx.Respond(http.StatusOK, nil)
+
+	node.mutex.Lock()
+	expectedSlot := node.HighestSlot + POOL_DELAY
+	node.mutex.Unlock()
+
+	ctx.Respond(http.StatusOK, expectedSlot)
 }
 
 func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[ProposePayload, any]) {

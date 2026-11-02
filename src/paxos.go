@@ -304,6 +304,14 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 }
 
 func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
+	this.partitionMutex.RLock()
+	_, exists := this.partitions[partition]
+	this.partitionMutex.RUnlock()
+
+	if exists {
+		return nil
+	}
+
 	if this.GetPartitions().Contains(partition) {
 		return this.BootstrapPartitionFromExisting(partition)
 	}

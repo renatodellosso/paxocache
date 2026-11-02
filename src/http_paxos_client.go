@@ -140,21 +140,37 @@ func (this *HttpPaxosClient[TOp, TRes]) Join(from string) error {
 		return fmt.Errorf("Attempted to join without 'from'! Partition: %v, ID: %v", this.node.Partition, this.node.Id)
 	}
 
-	var res bool
+	var expectedJoinSlot uint64
 	_, err := this.client.Post(this.node.Leader, this.prefix + PAXOS_JOIN_ROUTE + "/" + this.node.Partition, WithFrom[any]{
 		From: from,
 		Val: nil,
-	}, &res)
+	}, &expectedJoinSlot)
 
 	if err != nil {
 		return err
 	}
 
-	if res != false {
-		return errors.New("Failed to join pool") 
+	timeout := TIMEOUT
+	delay := INITIAL_POLL_DELAY
+	for timeout > 0 {
+		this.node.mutex.Lock()
+		inPool, determinable := this.node.isInPool(expectedJoinSlot, this.node.Id)
+		this.node.mutex.Unlock()
+
+		if determinable {
+			if !inPool {
+				return errors.New("Failed to join pool")
+			}
+
+			return nil
+		}
+
+		time.Sleep(delay)
+		timeout -= delay
+		delay *= 2
 	}
 
-	return nil
+	return errors.New("Timeout expired while waiting for join to process")
 }
 
 func (this *HttpPaxosClient[TOp, TRes]) Propose(slotType ChosenSlotType, val any) error {
