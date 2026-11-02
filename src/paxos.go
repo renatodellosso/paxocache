@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v3"
 )
@@ -57,6 +58,12 @@ type Paxos[TOp comparable, TRes any] struct {
 	processOp func(op TOp, prev TRes) TRes
 
 	logger *slog.Logger
+
+	reservedInittingPartitions mapset.Set[string]
+	reservedInittingPartitionsMutex sync.Mutex
+
+	inittedPartitions mapset.Set[string]
+	inittedPartitionsMutex sync.RWMutex
 }
 
 func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDiscoveryService, createRootPersistor func() PaxosPersistor[PartitionOperation, mapset.Set[string]], createPersistor func(partition string) PaxosPersistor[TOp, TRes]) *Paxos[TOp, TRes] {
@@ -75,6 +82,8 @@ func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDi
 		CreateRootPersistor: createRootPersistor,
 		CreatePersistor: createPersistor,
 		logger: logger,
+		reservedInittingPartitions: mapset.NewSet[string](),
+		inittedPartitions: mapset.NewSet[string](),
 	}
 
 	return &paxos
@@ -313,10 +322,10 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 
 // Globally creates a partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
-	if this.DoesPartitionExistLocally(partition) {
-		return nil
+	if !this.TryReservePartitionForCreation(partition) {
+		return this.BlockUntilPartitionIsInitted(partition)
 	}
-	
+
 	this.logger.Debug("Bootstrapping partition for cluster", "partition", partition)
 
 	persistor := this.CreatePersistor(partition)
@@ -324,6 +333,8 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 	if err != nil {
 		this.logger.Error("Couldn't get recovery data (if any) for partition.", "partition", partition, "error", err)
+		
+		this.UnreservePartition(partition)
 		return err
 	}
 
@@ -336,11 +347,15 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 		if err != nil {
 			this.logger.Error("Couldn't bootstrap partition.", "error", err)
+
+			this.UnreservePartition(partition)
 			return err
 		}
 	}
 
 	this.createNodeForPartition(partition, data)
+
+	this.MarkPartitionInitted(partition)
 
 	this.logger.Info("Bootstrapped partition!")
 	return nil
@@ -348,8 +363,8 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 // Pulls and locally creates one partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
-	if this.DoesPartitionExistLocally(partition) {
-		return nil
+	if !this.TryReservePartitionForCreation(partition) {
+		return this.BlockUntilPartitionIsInitted(partition)
 	}
 
 	var pulled PaxosCoreData[TOp, TRes]
@@ -361,6 +376,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 	_, err := this.client.Get(leader,  PAXOS_PULL_ROUTE + "/" + partition, nil, &pulled)
 
 	if err != nil {
+		this.UnreservePartition(partition)
 		return err
 	}
 
@@ -369,6 +385,8 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 
 	if err != nil {
 		this.logger.Error("Couldn't get recovery data (if any) for partition.", "partition", partition, "error", err)
+
+		this.UnreservePartition(partition)
 		return err
 	}
 
@@ -378,9 +396,11 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 
 	err = client.Join(node.Id)
 	if err != nil {
+		this.UnreservePartition(partition)
 		return err
 	}
 
+	this.MarkPartitionInitted(partition)
 	return nil
 }
 
@@ -441,10 +461,48 @@ func (this *Paxos[TOp, TRes]) GetPartition(partition string) (*PaxosNode[TOp, TR
 	return paxosPartition.node, nil
 }
 
-func (this *Paxos[TOp, TRes]) DoesPartitionExistLocally(partition string) bool {
-	this.partitionMutex.RLock()
-	_, exists := this.partitions[partition]
-	this.partitionMutex.RUnlock()
+// Returns success
+func (this *Paxos[TOp, TRes]) TryReservePartitionForCreation(partition string) bool {
+	this.reservedInittingPartitionsMutex.Lock()
+	defer this.reservedInittingPartitionsMutex.Unlock()
 
-	return exists
+	success := !this.reservedInittingPartitions.ContainsOne(partition)
+	this.reservedInittingPartitions.Add(partition)
+	
+	return success
+}
+
+func (this *Paxos[TOp, TRes]) MarkPartitionInitted(partition string) {
+	this.inittedPartitionsMutex.Lock()
+	defer this.inittedPartitionsMutex.Unlock()
+
+	this.inittedPartitions.Add(partition)
+}
+
+func (this *Paxos[TOp, TRes]) UnreservePartition(partition string) {
+	this.reservedInittingPartitionsMutex.Lock()
+	defer this.reservedInittingPartitionsMutex.Unlock()
+
+	this.reservedInittingPartitions.Remove(partition)
+}
+
+func (this *Paxos[TOp, TRes]) BlockUntilPartitionIsInitted(partition string) error {
+	timeout := TIMEOUT
+	delay := INITIAL_POLL_DELAY
+
+	for timeout > 0 {
+		this.inittedPartitionsMutex.RLock()
+		complete := this.inittedPartitions.ContainsOne(partition)
+		this.inittedPartitionsMutex.RUnlock()
+
+		if complete {
+			return nil
+		}
+
+		time.Sleep(delay)
+		timeout -= delay
+		delay *= 2
+	}
+
+	return errors.New("Timeout expired waiting for partition to finish bootstrapping")
 }
