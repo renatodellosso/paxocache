@@ -304,14 +304,6 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 }
 
 func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
-	this.partitionMutex.RLock()
-	_, exists := this.partitions[partition]
-	this.partitionMutex.RUnlock()
-
-	if exists {
-		return nil
-	}
-
 	if this.GetPartitions().Contains(partition) {
 		return this.BootstrapPartitionFromExisting(partition)
 	}
@@ -321,6 +313,10 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 
 // Globally creates a partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
+	if this.DoesPartitionExistLocally(partition) {
+		return nil
+	}
+	
 	this.logger.Debug("Bootstrapping partition for cluster", "partition", partition)
 
 	persistor := this.CreatePersistor(partition)
@@ -352,6 +348,10 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 // Pulls and locally creates one partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
+	if this.DoesPartitionExistLocally(partition) {
+		return nil
+	}
+
 	var pulled PaxosCoreData[TOp, TRes]
 
 	this.rootNode.mutex.Lock()
@@ -439,4 +439,12 @@ func (this *Paxos[TOp, TRes]) GetPartition(partition string) (*PaxosNode[TOp, TR
 	}
 
 	return paxosPartition.node, nil
+}
+
+func (this *Paxos[TOp, TRes]) DoesPartitionExistLocally(partition string) bool {
+	this.partitionMutex.RLock()
+	_, exists := this.partitions[partition]
+	this.partitionMutex.RUnlock()
+
+	return exists
 }
