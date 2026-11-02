@@ -548,7 +548,7 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 	go this.client.RequestAcceptance(slot)
 
 	// Wait for something to be committed in that slot
-	wait := time.Millisecond * 50
+	wait := INITIAL_POLL_DELAY
 	for timeout > 0 {
 		time.Sleep(wait)
 

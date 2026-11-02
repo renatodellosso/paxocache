@@ -18,6 +18,7 @@ const PAXOS_PROPOSE_ROUTE = "/cache/propose"
 const POOL_DELAY = 5
 
 const TIMEOUT = 60 * time.Second
+const INITIAL_POLL_DELAY = time.Millisecond
 
 type PoolChange int
 
