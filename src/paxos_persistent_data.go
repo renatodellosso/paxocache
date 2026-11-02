@@ -58,6 +58,13 @@ func MergeRecoveredAndPullData[TOp comparable, TRes any](id string, recovered *P
 	CopyMap(&recovered.Acceptances, &res.Acceptances)
 	CopyMap(&recovered.Chosen, &res.Chosen)
 	CopyMap(&recovered.Pools, &res.Pools)
+
+	for key, val := range pulled.Chosen {
+		_, ok := res.Chosen[key]
+		if !ok {
+			res.Chosen[key] = val
+		}
+	}
 	
 	if pulled.HighestSlot > recovered.HighestSlot {
 		res.HighestSlot = pulled.HighestSlot
