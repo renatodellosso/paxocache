@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 )
 
 // Must export fields for JSON to serialize them!
@@ -95,13 +96,28 @@ func (this *HttpPaxosClient[TOp, TRes]) Prepare(ballot Ballot) {
 
 func (this *HttpPaxosClient[TOp, TRes]) RequestAcceptance(slot Slot[TOp]) {
 	send := func(host string) {
-		var res AcceptPayload
-		_, err := this.client.Post(host, this.prefix + PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
-		if err != nil {
-			this.logger.Error("Error on RequestAcceptance from client", "id", this.node.Id, "partition", this.node.Partition, "host", host, "error", err.Error())
-		}
+		timeout := TIMEOUT
+		delay := INITIAL_POLL_DELAY
 
-		this.node.ReceiveAccept(res.From, res.Ballot, res.Success, res.SlotIndex)
+		for timeout > 0 {
+			var res AcceptPayload
+			_, err := this.client.Post(host, this.prefix + PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + this.node.Partition, this.withFrom(slot), &res)
+			
+			if err != nil {
+				this.logger.Error("Error on RequestAcceptance from client", "id", this.node.Id, "partition", this.node.Partition, "host", host, "error", err.Error())
+			}
+
+			// Retry on failure
+			if !res.Success {
+				time.Sleep(delay)
+				timeout -= delay
+				delay *= 2
+				continue
+			}
+
+			this.node.ReceiveAccept(res.From, res.Ballot, res.Success, res.SlotIndex)
+			return
+		}
 	}
 
 	this.forEachRecipient(false, slot.Number, send)

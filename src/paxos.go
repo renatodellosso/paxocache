@@ -281,7 +281,8 @@ func (this *Paxos[TOp, TRes]) BootstrapFromExisting() error {
 	}
 
 	// Join the cluster if we haven't already
-	if !this.rootNode.isInPool(this.rootNode.HighestSlot, this.rootNode.Id) {
+	inPool, determinable := this.rootNode.isInPool(this.rootNode.HighestSlot, this.rootNode.Id)
+	if !inPool || !determinable {
 		err := this.rootNode.client.Join(this.rootNode.Id)
 		if err != nil {
 			this.logger.Error("Couldn't bootstrap from existing.", "error", err)
@@ -344,7 +345,12 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 // Pulls and locally creates one partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
 	var pulled PaxosCoreData[TOp, TRes]
-	_, err := this.client.Get(this.rootNode.Leader,  PAXOS_PULL_ROUTE + "/" + partition, nil, &pulled)
+
+	this.rootNode.mutex.Lock()
+	leader := this.rootNode.Leader
+	this.rootNode.mutex.Unlock()
+
+	_, err := this.client.Get(leader,  PAXOS_PULL_ROUTE + "/" + partition, nil, &pulled)
 
 	if err != nil {
 		return err

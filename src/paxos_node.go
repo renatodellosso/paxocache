@@ -118,14 +118,14 @@ func (this *PaxosNode[TOp, TRes]) quorumSize(slot uint64) int {
 	return pool.Cardinality()/2 + 1
 }
 
-// Lock beforehand
-func (this *PaxosNode[TOp, TRes]) isInPool(slot uint64, id string) bool {
+// Lock beforehand. Returns (is in pool, could determine)
+func (this *PaxosNode[TOp, TRes]) isInPool(slot uint64, id string) (bool, bool) {
 	pool := this.GetPoolForSlot(slot)
 	if pool == nil {
-		return false
+		return false, false
 	}
 
-	return pool.ContainsOne(id)
+	return pool.ContainsOne(id), true
 }
 
 func applyPoolChange(prev mapset.Set[string], op PoolChangeOp) mapset.Set[string] {
@@ -305,7 +305,13 @@ func (this *PaxosNode[TOp, TRes]) ReceiveRequestAcceptance(from string, slot Slo
 		return false, this.PromisedBallot
 	}
 
-	if !this.isInPool(slot.Number, this.Id) {
+	inPool, determinable := this.isInPool(slot.Number, this.Id)
+	if !determinable {
+		this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "partition", this.Partition, "from", from, "ballot", slot.Ballot, "slot", slot, "success", false, "reason", "Could not determine pool for that slot", "pool", this.GetPoolForSlot(slot.Number))
+		return false, this.PromisedBallot
+	}
+
+	if !inPool {
 		this.logger.Debug("ReceiveRequestAcceptance", "id", this.Id, "partition", this.Partition, "from", from, "ballot", slot.Ballot, "slot", slot, "success", false, "reason", "Not in pool for that slot", "pool", this.GetPoolForSlot(slot.Number))
 		return false, this.PromisedBallot
 	}
@@ -404,7 +410,8 @@ func (this *PaxosNode[TOp, TRes]) ReceiveAccept(from string, ballot Ballot, succ
 
 	this.logger.Debug("ReceiveAccept", "id", this.Id, "partition", this.Partition, "from", from, "ballot", ballot, "success", success, "slotIndex", slotIndex)
 
-	if !success || !this.isInPool(slotIndex, from) {
+	inPool, determinable := this.isInPool(slotIndex, from)
+	if !success || !inPool || !determinable {
 		this.mutex.Unlock()
 		return
 	}
