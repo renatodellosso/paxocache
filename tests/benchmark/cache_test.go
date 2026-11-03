@@ -63,13 +63,21 @@ func BenchmarkCacheGet(b *testing.B) {
 
 				for _, key := range keys {
 					val := 123
-					caches[0].Set(key, &val)
+					err := caches[0].Set(key, &val)
+
+					if err != nil {
+						b.Errorf("%v", err)
+					}
 				}
 
 				// Warm keys
 				for _, key := range keys {
 					for _, cache := range caches {
-						cache.Get[int](key)
+						_, err := cache.Get[int](key)
+
+						if err != nil {
+							b.Errorf("%v", err)
+						}
 					}
 				}
 
@@ -82,7 +90,7 @@ func BenchmarkCacheGet(b *testing.B) {
 						_, err := caches[nodeIndex].Get[int](keys[keyIndex])
 
 						if err != nil {
-							b.Errorf("%v", err.Error())
+							b.Errorf("%v", err)
 						}
 
 						keyIndex = (keyIndex + 1) % keyCount
@@ -114,13 +122,21 @@ func BenchmarkCacheSet(b *testing.B) {
 
 				for _, key := range keys {
 					val := 123
-					caches[0].Set(key, &val)
+					err := caches[0].Set(key, &val)
+
+					if err != nil {
+						b.Errorf("%v", err)
+					}
 				}
 
 				// Warm keys
 				for _, key := range keys {
 					for _, cache := range caches {
-						cache.Get[int](key)
+						_, err := cache.Get[int](key)
+
+						if err != nil {
+							b.Errorf("%v", err)
+						}
 					}
 				}
 
@@ -133,7 +149,7 @@ func BenchmarkCacheSet(b *testing.B) {
 
 					for p.Next() {
 						if caches[nodeIndex].Set(keys[keyIndex], &val) != nil {
-							b.Errorf("%v", err.Error())
+							b.Errorf("%v", err)
 						}
 
 						keyIndex = (keyIndex + 1) % keyCount
