@@ -66,9 +66,6 @@ func BenchmarkCacheGet(b *testing.B) {
 					caches[0].Set(key, &val)
 				}
 
-				keyIndex := 0
-				nodeIndex := 0
-
 				// Warm keys
 				for _, key := range keys {
 					for _, cache := range caches {
@@ -78,8 +75,15 @@ func BenchmarkCacheGet(b *testing.B) {
 
 				b.ResetTimer()
 				b.RunParallel(func(p *testing.PB) {
+					keyIndex := 0
+					nodeIndex := 0
+
 					for p.Next() {
-						caches[nodeIndex].Get[int](keys[keyIndex])
+						_, err := caches[nodeIndex].Get[int](keys[keyIndex])
+
+						if err != nil {
+							b.Errorf("%v", err.Error())
+						}
 
 						keyIndex = (keyIndex + 1) % keyCount
 						if keyIndex == 1 {
@@ -113,9 +117,6 @@ func BenchmarkCacheSet(b *testing.B) {
 					caches[0].Set(key, &val)
 				}
 
-				keyIndex := 0
-				nodeIndex := 0
-
 				// Warm keys
 				for _, key := range keys {
 					for _, cache := range caches {
@@ -127,8 +128,13 @@ func BenchmarkCacheSet(b *testing.B) {
 
 				b.ResetTimer()
 				b.RunParallel(func(p *testing.PB) {
+					keyIndex := 0
+					nodeIndex := 0
+
 					for p.Next() {
-						caches[nodeIndex].Set(keys[keyIndex], &val)
+						if caches[nodeIndex].Set(keys[keyIndex], &val) != nil {
+							b.Errorf("%v", err.Error())
+						}
 
 						keyIndex = (keyIndex + 1) % keyCount
 						if keyIndex == 1 {
