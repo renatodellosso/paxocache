@@ -76,15 +76,19 @@ func BenchmarkCacheGet(b *testing.B) {
 					}
 				}
 
-				for b.Loop() {
-					caches[nodeIndex].Get[int](keys[keyIndex])
+				b.ResetTimer()
+				b.RunParallel(func(p *testing.PB) {
+					for p.Next() {
+						caches[nodeIndex].Get[int](keys[keyIndex])
 
-					keyIndex = (keyIndex + 1) % keyCount
-					if keyIndex == 1 {
-						// Increment such that we hit every node
-						nodeIndex = (nodeIndex + 1) % nodeCount
+						keyIndex = (keyIndex + 1) % keyCount
+						if keyIndex == 1 {
+							// Increment such that we hit every node
+							nodeIndex = (nodeIndex + 1) % nodeCount
+						}
 					}
-				}
+				})
+				
 			})
 		}
 	}
@@ -121,15 +125,18 @@ func BenchmarkCacheSet(b *testing.B) {
 
 				val := 123
 
-				for b.Loop() {
-					caches[nodeIndex].Set(keys[keyIndex], &val)
+				b.ResetTimer()
+				b.RunParallel(func(p *testing.PB) {
+					for p.Next() {
+						caches[nodeIndex].Set(keys[keyIndex], &val)
 
-					keyIndex = (keyIndex + 1) % keyCount
-					if keyIndex == 1 {
-						// Increment such that we hit every node
-						nodeIndex = (nodeIndex + 1) % nodeCount
+						keyIndex = (keyIndex + 1) % keyCount
+						if keyIndex == 1 {
+							// Increment such that we hit every node
+							nodeIndex = (nodeIndex + 1) % nodeCount
+						}
 					}
-				}
+				})
 			})
 		}
 	}
