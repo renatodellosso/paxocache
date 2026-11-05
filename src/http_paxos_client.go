@@ -183,8 +183,13 @@ func (this *HttpPaxosClient[TOp, TRes]) Propose(slotType ChosenSlotType, val any
 		return err
 	}
 
+	this.node.mutex.Lock()
+	leader := this.node.Leader
+	partition := this.node.Partition
+	this.node.mutex.Unlock()
+
 	var res bool
-	_, err = this.client.Post(this.node.Leader, this.prefix + PAXOS_PROPOSE_ROUTE + "/" + this.node.Partition, ProposePayload{
+	_, err = this.client.Post(leader, this.prefix + PAXOS_PROPOSE_ROUTE + "/" + partition, ProposePayload{
 		Type: slotType,
 		Val: json.RawMessage(raw),
 	}, &res)
