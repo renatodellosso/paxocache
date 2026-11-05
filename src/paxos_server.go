@@ -19,6 +19,32 @@ type PaxosServer[TOp comparable, TRes any] struct {
 	paxos *Paxos[TOp, TRes]
 }
 
+func (this *PaxosServer[TOp, TRes]) getNode(partition string) (*PaxosNode[TOp, TRes], error) {
+	this.nodesMutex.RLock()
+	node, ok := this.nodes[partition]
+	this.nodesMutex.RUnlock()
+
+	if ok {
+		return node, nil
+	}
+
+	// Attempt to clone partition if missing
+	err := this.paxos.BootstrapPartitionFromExisting(partition)
+	if err != nil {
+		return nil, err
+	}
+
+	this.nodesMutex.RLock()
+	node, ok = this.nodes[partition]
+	this.nodesMutex.RUnlock()
+
+	if !ok {
+		return nil, errors.New("Partition not found. Reason unknown.")
+	}
+
+	return node, nil
+}
+
 func (this *PaxosServer[TOp, TRes]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], PromisePayload[TOp]]) {
 	this.nodesMutex.RLock()
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
@@ -49,13 +75,11 @@ func (this *PaxosServer[TOp, TRes]) HandlePrepare(ctx RequestContext[WithFrom[Ba
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[WithFrom[Slot[TOp]], AcceptPayload]) {
-	this.nodesMutex.RLock()
-	node, ok := this.nodes[ctx.Req.PathValue("partition")]
-	this.nodesMutex.RUnlock()
+	node, err := this.getNode(ctx.Req.PathValue("partition"))
 
-	if !ok {
-		this.logger.Error(PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
-		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+	if err != nil {
+		this.logger.Error(PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition", "error", err)
+		ctx.RespondWithError(http.StatusNotFound,  err)
 		return
 	}
 
@@ -80,21 +104,11 @@ func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[W
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleCommit(ctx RequestContext[WithFrom[Slot[TOp]], any]) {
-	partition := ctx.Req.PathValue("partition")
-	this.nodesMutex.RLock()
-	node, ok := this.nodes[partition]
-	this.nodesMutex.RUnlock()
+	node, err := this.getNode(ctx.Req.PathValue("partition"))
 
-	// Attempt to clone partition if missing
-	if !ok && this.paxos != nil && this.paxos.BootstrapPartitionFromExisting(partition) == nil {
-		this.nodesMutex.RLock()
-		node, ok = this.nodes[partition]
-		this.nodesMutex.RUnlock()
-	}
-
-	if !ok {
-		this.logger.Error(PAXOS_COMMIT_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
-		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+	if err != nil {
+		this.logger.Error(PAXOS_COMMIT_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition", "error", err)
+		ctx.RespondWithError(http.StatusNotFound,  err)
 		return
 	}
 
@@ -111,13 +125,11 @@ func (this *PaxosServer[TOp, TRes]) HandleCommit(ctx RequestContext[WithFrom[Slo
 }
 
 func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCoreData[TOp, TRes]]) {
-	this.nodesMutex.RLock()
-	node, ok := this.nodes[ctx.Req.PathValue("partition")]
-	this.nodesMutex.RUnlock()
+	node, err := this.getNode(ctx.Req.PathValue("partition"))
 
-	if !ok {
-		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
-		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+	if err != nil {
+		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition", "error", err)
+		ctx.RespondWithError(http.StatusNotFound,  err)
 		return
 	}
 
@@ -128,13 +140,11 @@ func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCore
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any], uint64]) {
-	this.nodesMutex.RLock()
-	node, ok := this.nodes[ctx.Req.PathValue("partition")]
-	this.nodesMutex.RUnlock()
+	node, err := this.getNode(ctx.Req.PathValue("partition"))
 
-	if !ok {
-		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
-		ctx.RespondWithError(http.StatusNotFound,  errors.New("Invalid partition"))
+	if err != nil {
+		this.logger.Error(PAXOS_JOIN_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition", "error", err)
+		ctx.RespondWithError(http.StatusNotFound,  err)
 		return
 	}
 
@@ -196,14 +206,11 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 
 func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[ProposePayload, any]) {
 	this.logger.Debug(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"))
-	
-	this.nodesMutex.RLock()
-	node, ok := this.nodes[ctx.Req.PathValue("partition")]
-	this.nodesMutex.RUnlock()
 
-	if !ok {
-		err := errors.New("Invalid partition")
-		this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", false, "error", err)
+	node, err := this.getNode(ctx.Req.PathValue("partition"))
+
+	if err != nil {
+		this.logger.Error(PAXOS_PROPOSE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition", "error", err)
 		ctx.RespondWithError(http.StatusNotFound,  err)
 		return
 	}
