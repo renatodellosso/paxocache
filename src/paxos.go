@@ -180,7 +180,12 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 			node.mutex.Lock()
 			defer node.mutex.Unlock()
 
-			return node.GetPoolForSlot(slot).ToSlice()
+			pool := node.GetPoolForSlot(slot)
+
+			if pool == nil {
+				return nil
+			}
+			return pool.ToSlice()
 		},
 		getAllRecipients: func(slot uint64) []string {
 			this.partitionMutex.RLock()

@@ -58,6 +58,10 @@ func (this *HttpPaxosClient[TOp, TRes]) forEachRecipient(includeAll bool, slot u
 		recipients = this.getRecipients(slot)
 	}
 
+	if recipients == nil {
+		return
+	}
+
 	for _, host := range recipients {
 		go f(host)
 	}
