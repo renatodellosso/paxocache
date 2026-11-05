@@ -4,18 +4,25 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 )
 
 type PaxosServer[TOp comparable, TRes any] struct {
 	logger *slog.Logger
 
 	nodes map[string]*PaxosNode[TOp, TRes]
+	nodesMutex sync.RWMutex
+
 	// Defaults to "" (no prefix)
 	prefix string
+
+	paxos *Paxos[TOp, TRes]
 }
 
 func (this *PaxosServer[TOp, TRes]) HandlePrepare(ctx RequestContext[WithFrom[Ballot], PromisePayload[TOp]]) {
+	this.nodesMutex.RLock()
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+	this.nodesMutex.RUnlock()
 
 	if !ok {
 		this.logger.Error(PAXOS_PREPARE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
@@ -42,7 +49,9 @@ func (this *PaxosServer[TOp, TRes]) HandlePrepare(ctx RequestContext[WithFrom[Ba
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[WithFrom[Slot[TOp]], AcceptPayload]) {
+	this.nodesMutex.RLock()
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+	this.nodesMutex.RUnlock()
 
 	if !ok {
 		this.logger.Error(PAXOS_REQUEST_ACCEPTANCE_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
@@ -71,7 +80,17 @@ func (this *PaxosServer[TOp, TRes]) HandleRequestAcceptance(ctx RequestContext[W
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleCommit(ctx RequestContext[WithFrom[Slot[TOp]], any]) {
-	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+	partition := ctx.Req.PathValue("partition")
+	this.nodesMutex.RLock()
+	node, ok := this.nodes[partition]
+	this.nodesMutex.RUnlock()
+
+	// Attempt to clone partition if missing
+	if !ok && this.paxos != nil && this.paxos.BootstrapPartitionFromExisting(partition) == nil {
+		this.nodesMutex.RLock()
+		node, ok = this.nodes[partition]
+		this.nodesMutex.RUnlock()
+	}
 
 	if !ok {
 		this.logger.Error(PAXOS_COMMIT_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
@@ -92,7 +111,9 @@ func (this *PaxosServer[TOp, TRes]) HandleCommit(ctx RequestContext[WithFrom[Slo
 }
 
 func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCoreData[TOp, TRes]]) {
+	this.nodesMutex.RLock()
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+	this.nodesMutex.RUnlock()
 
 	if !ok {
 		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
@@ -107,7 +128,9 @@ func (this *PaxosServer[TOp, TRes]) HandlePull(ctx RequestContext[any, PaxosCore
 }
 
 func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any], uint64]) {
+	this.nodesMutex.RLock()
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+	this.nodesMutex.RUnlock()
 
 	if !ok {
 		this.logger.Error(PAXOS_PULL_ROUTE + "/" + ctx.Req.PathValue("partition") + ": invalid partition")
@@ -173,7 +196,10 @@ func (this *PaxosServer[TOp, TRes]) HandleJoin(ctx RequestContext[WithFrom[any],
 
 func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[ProposePayload, any]) {
 	this.logger.Debug(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"))
+	
+	this.nodesMutex.RLock()
 	node, ok := this.nodes[ctx.Req.PathValue("partition")]
+	this.nodesMutex.RUnlock()
 
 	if !ok {
 		err := errors.New("Invalid partition")

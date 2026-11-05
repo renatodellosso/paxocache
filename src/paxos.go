@@ -86,6 +86,8 @@ func NewPaxos[TOp comparable, TRes any](logger *slog.Logger, discovery *ServerDi
 		inittedPartitions: mapset.NewSet[string](),
 	}
 
+	paxos.server.paxos = &paxos
+
 	return &paxos
 }
 
@@ -158,7 +160,9 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 
 	rootClient.node = this.rootNode
 
+	this.rootServer.nodesMutex.Lock()
 	this.rootServer.nodes[this.rootNode.Partition] = this.rootNode
+	this.rootServer.nodesMutex.Unlock()
 
 	if data == nil {
 		return this.rootNode.TryTakeLeadership(TIMEOUT)
@@ -214,8 +218,11 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 	this.partitions[partition] = PaxosPartition[TOp, TRes]{
 		node, &client,
 	}
-	this.server.nodes[partition] = node
 	this.partitionMutex.Unlock()
+
+	this.server.nodesMutex.Lock()
+	this.server.nodes[partition] = node
+	this.server.nodesMutex.Unlock()
 
 	if data == nil {
 		node.TryTakeLeadership(TIMEOUT)
