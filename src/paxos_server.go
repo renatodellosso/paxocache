@@ -212,7 +212,7 @@ func (this *PaxosServer[TOp, TRes]) HandlePropose(ctx RequestContext[ProposePayl
 	}
 
 
-	this.logger.Error(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", true)
+	this.logger.Debug(PAXOS_PROPOSE_ROUTE, "partition", ctx.Req.PathValue("partition"), "success", true)
 	ctx.Respond(http.StatusOK, nil)
 }
 

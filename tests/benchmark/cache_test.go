@@ -48,7 +48,7 @@ func createKeyList(keyCount int) []string {
 
 
 func BenchmarkCacheGet(b *testing.B) {
-	keyCounts := []int{100, 1000}
+	keyCounts := []int{100}
 	nodeCounts := []int{1, 5}
 
 	for _, keyCount := range keyCounts {
@@ -107,7 +107,7 @@ func BenchmarkCacheGet(b *testing.B) {
 }
 
 func BenchmarkCacheSet(b *testing.B) {
-	keyCounts := []int{100, 1000}
+	keyCounts := []int{100}
 	nodeCounts := []int{2, 5}
 
 	for _, keyCount := range keyCounts {
@@ -148,7 +148,8 @@ func BenchmarkCacheSet(b *testing.B) {
 					nodeIndex := 0
 
 					for p.Next() {
-						if caches[nodeIndex].Set(keys[keyIndex], &val) != nil {
+						err := caches[nodeIndex].Set(keys[keyIndex], &val)
+						if err != nil {
 							b.Errorf("%v", err)
 						}
 

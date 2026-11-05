@@ -489,9 +489,10 @@ func (this *PaxosNode[TOp, TRes]) ProposeWithTimeout(slotType ChosenSlotType, va
 
 	if this.Leader != this.Id {
 		this.logger.Debug("Forwarding proposal to leader...", "type", slotType, "val", val, "timeout", timeout)
-		err := this.client.Propose(slotType, val)
 
 		this.mutex.Unlock()
+		err := this.client.Propose(slotType, val)
+		
 		return slotNumber, err
 	}
 
