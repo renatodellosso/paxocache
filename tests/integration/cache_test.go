@@ -46,6 +46,7 @@ func TestCacheSetAndGet(t *testing.T) {
 	val, err := cache.Get[int](key)
 
 	assert.Nil(t, err)
+	require.NotNil(t, val)
 	assert.Equal(t, expected, *val)
 }
 
@@ -73,6 +74,7 @@ func TestCacheSetAndGetTwoNodes(t *testing.T) {
 	val, err := cacheB.Get[int](key)
 
 	assert.Nil(t, err)
+	require.NotNil(t, val)
 	assert.Equal(t, expectedA, *val)
 
 	// B -> A
@@ -81,5 +83,6 @@ func TestCacheSetAndGetTwoNodes(t *testing.T) {
 	val, err = cacheA.Get[int](key)
 
 	assert.Nil(t, err)
+	require.NotNil(t, val)
 	assert.Equal(t, expectedB, *val)
 }
