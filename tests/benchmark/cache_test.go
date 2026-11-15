@@ -4,7 +4,6 @@ import (
 	"fmt"
 	paxocache "paxocache/src"
 	"paxocache/tests"
-	"strconv"
 	"testing"
 )
 
@@ -34,16 +33,6 @@ func createCacheNetwork(b *testing.B, nodeCount int) ([]*paxocache.Cache, error)
 	}
 
 	return res, nil
-}
-
-func createKeyList(keyCount int) []string {
-	res := []string{}
-
-	for i := range keyCount {
-		res = append(res, strconv.Itoa(i))
-	}
-
-	return res
 }
 
 
