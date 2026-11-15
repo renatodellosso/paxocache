@@ -74,5 +74,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Benchmark
+      - name: Benchmark cache and Redis
+        if: runner.os == 'Linux'
         run: go test '-run=^$' '-bench=.' -benchmem '-cpu=2,4' -benchtime=200x -timeout=5m ./...
+
+      - name: Benchmark cache
+        if: runner.os != 'Linux'
+        run: go test '-run=^$' '-bench=^BenchmarkCache' -benchmem '-cpu=2,4' -benchtime=200x -timeout=5m ./...
