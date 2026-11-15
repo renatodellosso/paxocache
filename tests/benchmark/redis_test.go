@@ -107,3 +107,62 @@ func BenchmarkRedisGet(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkRedisSet(b *testing.B) {
+	keyCounts := []int{100}
+
+	for _, keyCount := range keyCounts {
+		keys := createKeyList(keyCount)
+
+		b.Run(fmt.Sprintf("keys:%d", keyCount), func(b *testing.B) {
+			err := startRedis()
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.Cleanup(func() {
+				stopRedis()
+			})
+
+			client, err := getClient()
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			ctx := context.Background()
+
+			for _, key := range keys {
+				val := 123
+				res := client.Set(ctx, key, val, 0)
+
+				if res.Err() != nil {
+					b.Fatal(res.Err())
+				}
+			}
+
+			// Warm keys
+			for _, key := range keys {
+				res := client.Get(ctx, key)
+				
+				if res.Err() != nil {
+					b.Fatal(res.Err())
+				}
+			}
+
+			b.ResetTimer()
+			b.RunParallel(func(p *testing.PB) {
+				keyIndex := 0
+
+				for p.Next() {
+					res := client.Set(ctx, keys[keyIndex], 123, 0)
+
+					if res.Err() != nil {
+						b.Error(res.Err())
+					}
+
+					keyIndex = (keyIndex + 1) % keyCount
+				}
+			})
+		})
+	}
+}
