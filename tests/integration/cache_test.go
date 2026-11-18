@@ -21,7 +21,7 @@ func TestCacheInits(t *testing.T) {
 func TestCacheGetNonExisting(t *testing.T) {
 	cache := paxocache.NewCache().
 																			WithBasePath(t.TempDir()).
-																			WithLogger(tests.SilentLogger())
+																			WithLogger(tests.DebugLogger())
 
 	require.Nil(t, cache.Init())
 
@@ -85,4 +85,59 @@ func TestCacheSetAndGetTwoNodes(t *testing.T) {
 	assert.Nil(t, err)
 	require.NotNil(t, val)
 	assert.Equal(t, expectedB, *val)
+}
+
+func TestCacheCreatingPartitionClonesItOnOtherNodes(t *testing.T) {
+	cacheA := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			WithLogger(tests.DebugLogger())
+
+	require.Nil(t, cacheA.Init())
+
+	cacheB := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			WithLogger(tests.SilentLogger()).
+																			WithKnownHost(cacheA.GetAddress())
+
+	require.Nil(t, cacheB.Init())
+
+	key := "key"
+	val := 123
+	
+	require.Nil(t, cacheA.Set(key, &val))
+
+	assert.ElementsMatch(t, cacheB.GetKnownKeys().ToSlice(), cacheB.GetLocalKeys().ToSlice())
+	assert.Contains(t, cacheB.GetLocalKeys().ToSlice(), key)
+}
+
+func TestCacheContinuesIfNodeFailsBeforeSet(t *testing.T) {
+	cacheA := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			WithLogger(tests.SilentLogger())
+
+	require.Nil(t, cacheA.Init())
+
+	cacheB := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			WithLogger(tests.SilentLogger()).
+																			WithKnownHost(cacheA.GetAddress())
+
+	require.Nil(t, cacheB.Init())
+
+	cacheC := paxocache.NewCache().
+																			WithBasePath(t.TempDir()).
+																			WithLogger(tests.SilentLogger()).
+																			WithKnownHost(cacheA.GetAddress())
+	require.Nil(t, cacheC.Init())
+
+	require.Nil(t, cacheA.Shutdown())
+
+	key := "key"
+	val := 123
+
+	require.Nil(t, cacheB.Set(key, &val))
+
+	actual, err := cacheC.Get[int](key)
+	require.Nil(t, err)
+	assert.Equal(t, val, *actual)
 }

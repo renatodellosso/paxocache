@@ -4,13 +4,20 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"strings"
+	"uuid"
 
 	mapset "github.com/deckarep/golang-set/v3"
 )
 
+func withCacheId(logger *slog.Logger) *slog.Logger {
+	return logger.With("cacheId", strings.Split(uuid.New().String(), "-")[0])
+}
+
 type Cache struct {
 	paxos *Paxos[CacheOp, string]
 	logger *slog.Logger
+	listener *Listener
 	createRootPersistor func() PaxosPersistor[PartitionOperation, mapset.Set[string]]
 	createPersistor func(partition string) PaxosPersistor[CacheOp, string]
 	
@@ -26,7 +33,7 @@ func NewCache() *Cache {
 	options := slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &options))
+	logger := withCacheId(slog.New(slog.NewJSONHandler(os.Stdout, &options)))
 
 	cache := Cache{
 		logger: logger,
@@ -70,7 +77,7 @@ func (this *Cache) WithCreatePersistor(root func() PaxosPersistor[PartitionOpera
 }
 
 func (this *Cache) WithLogger(logger *slog.Logger) *Cache {
-	this.logger = logger
+	this.logger = withCacheId(logger)
 	
 	return this
 }
@@ -84,11 +91,11 @@ func (this *Cache) WithKnownHost(host string) *Cache {
 func (this *Cache) Init() error {
 	this.logger.Debug("Initializing cache...")
 
-	listener := Listener{
+	this.listener = &Listener{
 		Logger: this.logger,
 		Token: "",
 	}
-	err := listener.Listen()
+	err := this.listener.Listen()
 
 	if err != nil {
 		return err
@@ -97,7 +104,8 @@ func (this *Cache) Init() error {
 	this.logger.Debug("Listener is up")
 	
 	discovery := NewServerDiscoveryService(this.logger)
-	discovery.RegisterListener(&listener)
+
+	discovery.RegisterListener(this.listener)
 
 	this.logger.Debug("Registered discovery with listener")
 
@@ -107,7 +115,7 @@ func (this *Cache) Init() error {
 	this.logger.Debug("Exchanged with preregistered hosts")
 
 	this.paxos = NewPaxos(this.logger, discovery, this.createRootPersistor, this.createPersistor)
-	this.paxos.RegisterListener(&listener)
+	this.paxos.RegisterListener(this.listener)
 	this.paxos.processOp = processCacheOp
 
 	this.logger.Debug("Registered paxos with listener")
@@ -195,4 +203,21 @@ func (this *Cache) GetAddress() string {
 
 func (this *Cache) SyncWith(host string) error {
 	return this.paxos.discovery.ExchangeWith(host, true)
+}
+
+func (this *Cache) Shutdown() error {
+	this.logger.Info("Shutting down...")
+
+	err := this.listener.Listener.Close()
+	return err
+}
+
+// Returns all keys committed on rootNode, regardless of whether we have a partition for them
+func (this *Cache) GetKnownKeys() mapset.Set[string] {
+	return this.paxos.GetPartitions()
+}
+
+// Returns the set of keys we actually have partitions for
+func (this *Cache) GetLocalKeys() mapset.Set[string] {
+	return this.paxos.GetLocalPartitions()
 }

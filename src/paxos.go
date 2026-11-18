@@ -3,6 +3,8 @@ package paxocache
 import (
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -157,6 +159,13 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 
 	this.rootNode.ProcessOperation = processPartitionOperation
 	this.rootNode.Partition = ROOT_PARTITION
+
+	// Pull a new partition when it's committed
+	this.rootNode.onCommit = func(op PartitionOperation) {
+		if !this.HasPartitionCloned(op.Partition) {
+			this.BootstrapPartitionFromExisting(op.Partition)
+		}
+	}
 
 	rootClient.node = this.rootNode
 
@@ -334,6 +343,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 
 // Globally creates a partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
+	this.logger.Debug("Bootstrapping partition for cluster", "id", this.discovery.Address, "partition", partition)
 	if !this.TryReservePartitionForCreation(partition) {
 		return this.BlockUntilPartitionIsInitted(partition)
 	}
@@ -375,6 +385,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 
 // Pulls and locally creates one partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
+	this.logger.Debug("Bootstrapping partition from existing", "id", this.discovery.Address, "partition", partition)
 	if !this.TryReservePartitionForCreation(partition) {
 		return this.BlockUntilPartitionIsInitted(partition)
 	}
@@ -425,6 +436,18 @@ func (this *Paxos[TOp, TRes]) GetPartitions() mapset.Set[string] {
 	}
 
 	return res
+}
+
+func (this *Paxos[TOp, TRes]) GetLocalPartitions() mapset.Set[string] {
+	return mapset.NewSet(slices.Collect(maps.Keys(this.partitions))...)
+}
+
+func (this *Paxos[TOp, TRes]) HasPartitionCloned(partition string) bool {
+	this.partitionMutex.RLock()
+	defer this.partitionMutex.RUnlock()
+
+	_, ok := this.partitions[partition]
+	return ok
 }
 
 // Returns what the root node's pool will be after all committed pool changes take effect (effectively HighestSlot + POOL_DELAY)

@@ -210,3 +210,26 @@ func TestBootstrapPartitionFromExistingRecoversData(t *testing.T) {
 
 	assert.Equal(t, op.num, paxosB.GetPartitionState(partition))
 }
+
+func TestBootstrapPartitionForClusterPullsPartitionOnOtherNodes(t *testing.T) {
+	logger := tests.SilentLogger()
+
+	_, discoveryA, paxosA := createTestStack(logger)
+	_, discoveryB, paxosB := createTestStack(logger)
+
+	require.Nil(t, discoveryB.ExchangeWith(discoveryA.Address, true))
+	require.Nil(t, paxosA.BootstrapCluster())
+	require.Nil(t, paxosB.BootstrapFromExisting())
+
+	key := "key"
+
+	require.Nil(t, paxosA.BootstrapPartitionForCluster(key))
+
+	partition, err := paxosA.GetPartition(key)
+	require.Nil(t, err)
+	require.NotNil(t, partition)
+
+	partition, err = paxosB.GetPartition(key)
+	require.Nil(t, err)
+	require.NotNil(t, partition)
+}

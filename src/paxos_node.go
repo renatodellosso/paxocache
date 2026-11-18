@@ -37,6 +37,7 @@ type PaxosNode[TOp comparable, TRes any] struct {
 	PendingAcceptances map[uint64]PendingSlot[TOp]
 
 	ProcessOperation func(op TOp, prev TRes) TRes
+	onCommit func(op TOp)
 
 	CachedSlot uint64
 	CachedState TRes
@@ -460,7 +461,11 @@ func (this *PaxosNode[TOp, TRes]) ReceiveCommit(from string, slot Slot[TOp]) {
 	
 	err := this.persistor.AppendChosen(&slot.ChosenSlot)
 	if err != nil {
-	this.logger.Error("ReceiveCommit", "id", this.Id, "partition", this.Partition, "from", from, "slot", slot, "error", err)
+		this.logger.Error("ReceiveCommit", "id", this.Id, "partition", this.Partition, "from", from, "slot", slot, "error", err)
+	}
+
+	if slot.Type == ChosenSlotOperation && this.onCommit != nil {
+		this.onCommit(slot.Operation)
 	}
 }
 
