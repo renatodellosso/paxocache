@@ -21,7 +21,7 @@ func TestCacheInits(t *testing.T) {
 func TestCacheGetNonExisting(t *testing.T) {
 	cache := paxocache.NewCache().
 																			WithBasePath(t.TempDir()).
-																			WithLogger(tests.DebugLogger())
+																			WithLogger(tests.SilentLogger())
 
 	require.Nil(t, cache.Init())
 

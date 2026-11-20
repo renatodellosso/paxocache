@@ -161,11 +161,14 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 	this.rootNode.Partition = ROOT_PARTITION
 
 	// Pull a new partition when it's committed
-	// this.rootNode.onCommit = func(op PartitionOperation) {
-	// 	if !this.HasPartitionCloned(op.Partition) {
-	// 		this.BootstrapPartitionFromExisting(op.Partition)
-	// 	}
-	// }
+	this.rootNode.onCommit = func(op PartitionOperation) {
+		exists := this.HasPartitionCloned(op.Partition)
+		this.logger.Debug("Partition was committed", "partition", op.Partition, "exists", exists)
+
+		if !exists {
+			this.initLocalPartition(op.Partition, nil, nil, true)
+		}
+	}
 
 	rootClient.node = this.rootNode
 
@@ -343,6 +346,11 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 
 // Reserves and creates a partition locally. Doesn't handle joining or pulling, but does handle recovery.
 func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *PaxosCoreData[TOp, TRes], ifNew func() error, markInitted bool) (error, *HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
+	if this.HasPartitionCloned(partition) {
+		this.logger.Error("Tried to init already-initted partition", "partition", partition)
+		return errors.New("Partition already initted locally: " + partition), nil, nil
+	}
+	
 	if !this.TryReservePartitionForCreation(partition) {
 		return this.BlockUntilPartitionIsInitted(partition), nil, nil
 	}
@@ -363,7 +371,9 @@ func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *Paxos
 		data = MergeRecoveredAndPullData(this.discovery.Address, data, pulled)
 	}
 
-	if data == nil && ifNew != nil {
+	client, node := this.createNodeForPartition(partition, data)
+
+	if ifNew != nil {
 		// Propose creating partition as it doesn't exist
 		err := ifNew()
 
@@ -375,12 +385,11 @@ func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *Paxos
 		}
 	}
 
-	client, node := this.createNodeForPartition(partition, data)
-
 	if markInitted {
 		this.MarkPartitionInitted(partition)
 	}
 
+	this.logger.Debug("Initialized partition", "partition", partition)
 	return nil, client, node
 }
 
