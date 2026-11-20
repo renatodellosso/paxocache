@@ -161,12 +161,12 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 	this.rootNode.Partition = ROOT_PARTITION
 
 	// Pull a new partition when it's committed
-	this.rootNode.onCommit = func(op PartitionOperation) {
+	this.rootNode.onCommit = func(op PartitionOperation, from string) {
 		exists := this.HasPartitionCloned(op.Partition)
 		this.logger.Debug("Partition was committed", "partition", op.Partition, "exists", exists)
 
 		if !exists {
-			this.initLocalPartition(op.Partition, nil, nil, true)
+			this.initLocalPartition(op.Partition, nil, nil, true, &from)
 		}
 	}
 
@@ -183,7 +183,7 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 	return nil
 }
 
-func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *PaxosPersistentData[TOp, TRes]) (*HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
+func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *PaxosPersistentData[TOp, TRes], defaultLeader *string) (*HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
 	client := HttpPaxosClient[TOp, TRes]{
 		client: Http(this.token, this.logger),
 		logger: this.logger,
@@ -236,8 +236,12 @@ func (this *Paxos[TOp, TRes]) createNodeForPartition(partition string, data *Pax
 	this.server.nodes[partition] = node
 	this.server.nodesMutex.Unlock()
 
-	if data == nil {
+	if data == nil && defaultLeader == nil {
 		node.TryTakeLeadership(TIMEOUT)
+	} else if defaultLeader != nil {
+		node.mutex.Lock()
+		node.Leader = *defaultLeader
+		node.mutex.Unlock()
 	}
 
 	return &client, node
@@ -345,7 +349,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 }
 
 // Reserves and creates a partition locally. Doesn't handle joining or pulling, but does handle recovery.
-func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *PaxosCoreData[TOp, TRes], ifNew func() error, markInitted bool) (error, *HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
+func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *PaxosCoreData[TOp, TRes], ifNew func() error, markInitted bool, defaultLeader *string) (error, *HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
 	if this.HasPartitionCloned(partition) {
 		this.logger.Error("Tried to init already-initted partition", "partition", partition)
 		return errors.New("Partition already initted locally: " + partition), nil, nil
@@ -371,7 +375,7 @@ func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *Paxos
 		data = MergeRecoveredAndPullData(this.discovery.Address, data, pulled)
 	}
 
-	client, node := this.createNodeForPartition(partition, data)
+	client, node := this.createNodeForPartition(partition, data, defaultLeader)
 
 	if ifNew != nil {
 		// Propose creating partition as it doesn't exist
@@ -404,7 +408,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 		})
 	}
 	
-	err, _, _ := this.initLocalPartition(partition, nil, ifNew, true)
+	err, _, _ := this.initLocalPartition(partition, nil, ifNew, true, nil)
 
 	if err != nil {
 		return err
@@ -430,7 +434,7 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 		return err
 	}
 
-	err, client, node := this.initLocalPartition(partition, &pulled, nil, false)
+	err, client, node := this.initLocalPartition(partition, &pulled, nil, false, nil)
 	if err != nil {
 		this.UnreservePartition(partition)
 		return err

@@ -90,7 +90,7 @@ func TestCacheSetAndGetTwoNodes(t *testing.T) {
 func TestCacheCreatingPartitionClonesItOnOtherNodes(t *testing.T) {
 	cacheA := paxocache.NewCache().
 																			WithBasePath(t.TempDir()).
-																			WithLogger(tests.DebugLogger())
+																			WithLogger(tests.SilentLogger())
 
 	require.Nil(t, cacheA.Init())
 

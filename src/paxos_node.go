@@ -37,7 +37,7 @@ type PaxosNode[TOp comparable, TRes any] struct {
 	PendingAcceptances map[uint64]PendingSlot[TOp]
 
 	ProcessOperation func(op TOp, prev TRes) TRes
-	onCommit func(op TOp)
+	onCommit func(op TOp, from string)
 
 	CachedSlot uint64
 	CachedState TRes
@@ -465,7 +465,7 @@ func (this *PaxosNode[TOp, TRes]) ReceiveCommit(from string, slot Slot[TOp]) {
 	}
 
 	if slot.Type == ChosenSlotOperation && this.onCommit != nil {
-		this.onCommit(slot.Operation)
+		this.onCommit(slot.Operation, from)
 	}
 }
 
