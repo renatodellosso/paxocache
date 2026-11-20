@@ -161,11 +161,11 @@ func (this *Paxos[TOp, TRes]) createRootNode(data *PaxosPersistentData[Partition
 	this.rootNode.Partition = ROOT_PARTITION
 
 	// Pull a new partition when it's committed
-	this.rootNode.onCommit = func(op PartitionOperation) {
-		if !this.HasPartitionCloned(op.Partition) {
-			this.BootstrapPartitionFromExisting(op.Partition)
-		}
-	}
+	// this.rootNode.onCommit = func(op PartitionOperation) {
+	// 	if !this.HasPartitionCloned(op.Partition) {
+	// 		this.BootstrapPartitionFromExisting(op.Partition)
+	// 	}
+	// }
 
 	rootClient.node = this.rootNode
 
@@ -341,14 +341,13 @@ func (this *Paxos[TOp, TRes]) BootstrapPartition(partition string) error {
 	return this.BootstrapPartitionForCluster(partition)
 }
 
-// Globally creates a partition
-func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
-	this.logger.Debug("Bootstrapping partition for cluster", "id", this.discovery.Address, "partition", partition)
+// Reserves and creates a partition locally. Doesn't handle joining or pulling, but does handle recovery.
+func (this *Paxos[TOp, TRes]) initLocalPartition(partition string, pulled *PaxosCoreData[TOp, TRes], ifNew func() error, markInitted bool) (error, *HttpPaxosClient[TOp, TRes], *PaxosNode[TOp, TRes]) {
 	if !this.TryReservePartitionForCreation(partition) {
-		return this.BlockUntilPartitionIsInitted(partition)
+		return this.BlockUntilPartitionIsInitted(partition), nil, nil
 	}
 
-	this.logger.Debug("Bootstrapping partition for cluster", "partition", partition)
+	this.logger.Debug("Initializing partition locally", "partition", partition)
 
 	persistor := this.CreatePersistor(partition)
 	data, err := this.getDataIfExistsForPartition(persistor)
@@ -357,27 +356,50 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 		this.logger.Error("Couldn't get recovery data (if any) for partition.", "partition", partition, "error", err)
 		
 		this.UnreservePartition(partition)
-		return err
+		return err, nil, nil
 	}
 
-	if data == nil {
+	if pulled != nil {
+		data = MergeRecoveredAndPullData(this.discovery.Address, data, pulled)
+	}
+
+	if data == nil && ifNew != nil {
 		// Propose creating partition as it doesn't exist
-		err := this.rootNode.client.Propose(ChosenSlotOperation, PartitionOperation{
-			PartitionCreate,
-			partition,
-		})
+		err := ifNew()
 
 		if err != nil {
-			this.logger.Error("Couldn't bootstrap partition.", "error", err)
+			this.logger.Error("Couldn't init partition.", "error", err)
 
 			this.UnreservePartition(partition)
-			return err
+			return err, nil, nil
 		}
 	}
 
-	this.createNodeForPartition(partition, data)
+	client, node := this.createNodeForPartition(partition, data)
 
-	this.MarkPartitionInitted(partition)
+	if markInitted {
+		this.MarkPartitionInitted(partition)
+	}
+
+	return nil, client, node
+}
+
+// Globally creates a partition
+func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) error {
+	this.logger.Debug("Bootstrapping partition for cluster", "id", this.discovery.Address, "partition", partition)
+
+	ifNew := func() error {
+		return this.rootNode.client.Propose(ChosenSlotOperation, PartitionOperation{
+			PartitionCreate,
+			partition,
+		})
+	}
+	
+	err, _, _ := this.initLocalPartition(partition, nil, ifNew, true)
+
+	if err != nil {
+		return err
+	}
 
 	this.logger.Info("Bootstrapped partition!")
 	return nil
@@ -386,9 +408,6 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionForCluster(partition string) err
 // Pulls and locally creates one partition
 func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) error {
 	this.logger.Debug("Bootstrapping partition from existing", "id", this.discovery.Address, "partition", partition)
-	if !this.TryReservePartitionForCreation(partition) {
-		return this.BlockUntilPartitionIsInitted(partition)
-	}
 
 	var pulled PaxosCoreData[TOp, TRes]
 
@@ -399,28 +418,22 @@ func (this *Paxos[TOp, TRes]) BootstrapPartitionFromExisting(partition string) e
 	_, err := this.client.Get(leader,  PAXOS_PULL_ROUTE + "/" + partition, nil, &pulled)
 
 	if err != nil {
+		return err
+	}
+
+	err, client, node := this.initLocalPartition(partition, &pulled, nil, false)
+	if err != nil {
 		this.UnreservePartition(partition)
 		return err
 	}
 
-	persistor := this.CreatePersistor(partition)
-	data, err := this.getDataIfExistsForPartition(persistor)
-
-	if err != nil {
-		this.logger.Error("Couldn't get recovery data (if any) for partition.", "partition", partition, "error", err)
-
-		this.UnreservePartition(partition)
-		return err
-	}
-
-	data = MergeRecoveredAndPullData(this.discovery.Address, data, &pulled)
-
-	client, node := this.createNodeForPartition(data.Partition, data)
-
-	err = client.Join(node.Id)
-	if err != nil {
-		this.UnreservePartition(partition)
-		return err
+	// Err, client, and node can all be nil when another thread reserved and initted the partition
+	if client != nil && node != nil {
+		err = client.Join(node.Id)
+		if err != nil {
+			this.UnreservePartition(partition)
+			return err
+		}
 	}
 
 	this.MarkPartitionInitted(partition)
